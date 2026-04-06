@@ -248,26 +248,35 @@ public class ActivityPostProcessingService {
         String formattedType = ActivityFormatter.formatActivityType(activity.getActivityType());
         content.append(activityEmoji).append(" ").append(formattedType);
 
-        // Metrics on separate lines
+        // Metrics, each on its own line with a blank line separating from above
+        StringBuilder metrics = new StringBuilder();
+
         if (activity.getTotalDistance() != null) {
-            content.append("\n📏 ")
-                .append(String.format("%.2f km", activity.getTotalDistance().doubleValue() / 1000.0));
+            metrics.append("📏 ")
+                .append(String.format("%.2f km", activity.getTotalDistance().doubleValue() / 1000.0))
+                .append("\n");
         }
 
         if (activity.getTotalDurationSeconds() != null) {
             long hours = activity.getTotalDurationSeconds() / 3600;
             long minutes = (activity.getTotalDurationSeconds() % 3600) / 60;
             long seconds = activity.getTotalDurationSeconds() % 60;
-            content.append("\n⏱️ ");
+            metrics.append("⏱️ ");
             if (hours > 0) {
-                content.append(hours).append("h ");
+                metrics.append(hours).append("h ");
             }
-            content.append(minutes).append("m ").append(seconds).append("s");
+            metrics.append(minutes).append("m ").append(seconds).append("s")
+                .append("\n");
         }
 
         if (activity.getElevationGain() != null) {
-            content.append("\n⛰️ ")
-                .append(String.format("%.0f m", activity.getElevationGain()));
+            metrics.append("⛰️ ")
+                .append(String.format("%.0f m", activity.getElevationGain()))
+                .append("\n");
+        }
+
+        if (metrics.length() > 0) {
+            content.append("\n\n").append(metrics.toString().stripTrailing());
         }
 
         return content.toString();
