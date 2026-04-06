@@ -8,8 +8,6 @@ import net.javahippie.fitpub.model.entity.Peak;
 import net.javahippie.fitpub.repository.ActivityPeakRepository;
 import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.PeakRepository;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -86,32 +84,37 @@ public class PeakDetectionService {
         }
 
         try {
-            log.info("Starting retroactive peak detection for all activities");
+            // Fetch only IDs to avoid loading huge BLOB fields into memory
+            List<UUID> activityIds = activityRepository.findAllIds();
 
-            int page = 0;
-            int pageSize = 100;
+            log.info("Starting retroactive peak detection for {} activities", activityIds.size());
+
             int totalProcessed = 0;
             int totalPeaksFound = 0;
 
-            Page<Activity> activityPage;
-            do {
-                activityPage = activityRepository.findAll(PageRequest.of(page, pageSize));
-                for (Activity activity : activityPage.getContent()) {
-                    try {
-                        List<Peak> peaks = detectPeaksForActivity(activity);
-                        totalPeaksFound += peaks.size();
-                        totalProcessed++;
-                    } catch (Exception e) {
-                        log.warn("Failed peak detection for activity {}: {}", activity.getId(), e.getMessage());
+            for (UUID activityId : activityIds) {
+                try {
+                    Activity activity = activityRepository.findById(activityId).orElse(null);
+                    if (activity == null) continue;
+
+                    List<Peak> peaks = detectPeaksForActivity(activity);
+                    totalPeaksFound += peaks.size();
+                    totalProcessed++;
+
+                    if (totalProcessed % 100 == 0) {
+                        log.info("Peak backfill progress: processed {} / {} activities, found {} peaks so far",
+                            totalProcessed, activityIds.size(), totalPeaksFound);
                     }
+                } catch (Exception e) {
+                    log.warn("Failed peak detection for activity {}: {}", activityId, e.getMessage(), e);
+                    totalProcessed++;
                 }
-                page++;
-                log.info("Peak backfill progress: processed {} / {} activities, found {} peaks so far",
-                    totalProcessed, activityPage.getTotalElements(), totalPeaksFound);
-            } while (activityPage.hasNext());
+            }
 
             log.info("Peak backfill complete: processed {} activities, found {} total peak associations",
                 totalProcessed, totalPeaksFound);
+        } catch (Exception e) {
+            log.error("Peak backfill failed: {}", e.getMessage(), e);
         } finally {
             backfillRunning.set(false);
         }

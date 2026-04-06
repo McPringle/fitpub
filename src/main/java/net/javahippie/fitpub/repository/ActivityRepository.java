@@ -20,6 +20,9 @@ import java.util.UUID;
 @Repository
 public interface ActivityRepository extends JpaRepository<Activity, UUID> {
 
+    @Query("SELECT a.id FROM Activity a")
+    List<UUID> findAllIds();
+
     /**
      * Find all activities for a specific user.
      *
