@@ -156,9 +156,18 @@ public class FitParser {
             point.setTimestamp(convertDateTime(record.getTimestamp()));
         }
 
-        // Extract elevation
-        if (record.getAltitude() != null) {
-            point.setElevation(BigDecimal.valueOf(record.getAltitude()).setScale(2, RoundingMode.HALF_UP));
+        // Extract elevation. Prefer enhanced_altitude (4-byte high-resolution barometric
+        // value used by modern Garmin devices) and fall back to the legacy altitude field
+        // if it's not present. Older devices write only the legacy field; newer Edge /
+        // Fenix / Forerunner units write only the enhanced one. Reading just one of them
+        // produces empty elevation profiles for everything recorded on the other class
+        // of device.
+        Float elevationValue = record.getEnhancedAltitude();
+        if (elevationValue == null) {
+            elevationValue = record.getAltitude();
+        }
+        if (elevationValue != null) {
+            point.setElevation(BigDecimal.valueOf(elevationValue).setScale(2, RoundingMode.HALF_UP));
         }
 
         // Extract heart rate
@@ -176,9 +185,15 @@ public class FitParser {
             point.setPower(record.getPower());
         }
 
-        // Extract speed (convert m/s to km/h)
-        if (record.getSpeed() != null) {
-            point.setSpeed(BigDecimal.valueOf(record.getSpeed() * MPS_TO_KPH)
+        // Extract speed (convert m/s to km/h). Same enhanced-vs-legacy split as altitude:
+        // modern Garmin devices write enhanced_speed (higher resolution) and may leave the
+        // legacy speed field null. Read both, preferring enhanced.
+        Float speedValue = record.getEnhancedSpeed();
+        if (speedValue == null) {
+            speedValue = record.getSpeed();
+        }
+        if (speedValue != null) {
+            point.setSpeed(BigDecimal.valueOf(speedValue * MPS_TO_KPH)
                 .setScale(2, RoundingMode.HALF_UP));
         }
 

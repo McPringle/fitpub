@@ -17,10 +17,13 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.List;
 
@@ -43,6 +46,24 @@ public class SecurityConfig {
      */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        // One-shot migration carve-out: allow POST /api/debug/reprocess-fit-elevation
+        // ONLY when the request comes from a loopback address. The intended workflow
+        // is "open a shell on the prod container, curl localhost:8080" — anyone outside
+        // the host network is rejected by the trailing denyAll() on /api/debug/**.
+        // Remove this matcher (and the corresponding permitAll line below) once the
+        // FIT elevation backfill is complete.
+        final RequestMatcher loopbackFitElevationMatcher = request -> {
+            if (!"POST".equalsIgnoreCase(request.getMethod())
+                || !"/api/debug/reprocess-fit-elevation".equals(request.getRequestURI())) {
+                return false;
+            }
+            try {
+                return InetAddress.getByName(request.getRemoteAddr()).isLoopbackAddress();
+            } catch (UnknownHostException e) {
+                return false;
+            }
+        };
+
         http
             .csrf(csrf -> csrf.disable()) // Disable CSRF for REST API
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -99,7 +120,10 @@ public class SecurityConfig {
                 // Public endpoints - User's public activities
                 .requestMatchers(HttpMethod.GET, "/api/activities/user/*").permitAll()
 
-                // Debug endpoints (dev only)
+                // Debug endpoints — denied by default. Specific endpoints can be
+                // carved out above this line for one-off backfills / migrations.
+                // Re-lock by removing the carve-outs once the migration is done.
+                .requestMatchers(loopbackFitElevationMatcher).permitAll()
                 .requestMatchers("/api/debug/**").denyAll()
 
                 // Public endpoints - Likes and Comments (GET only)

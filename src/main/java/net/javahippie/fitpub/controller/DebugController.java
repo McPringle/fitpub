@@ -164,4 +164,63 @@ public class DebugController {
 
         return org.springframework.http.ResponseEntity.ok(Map.of("status", "started"));
     }
+
+    private final java.util.concurrent.atomic.AtomicBoolean fitElevationReprocessRunning =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
+     * Backfill the per-track-point elevation profile for FIT activities that
+     * currently have none. Re-parses each FIT activity's stored raw bytes through
+     * the current FitParser (which reads {@code enhanced_altitude} from modern
+     * Garmin devices in addition to the legacy {@code altitude} field) and
+     * replaces the activity's track points JSON.
+     *
+     * <p>The job is idempotent: activities that already have at least one non-null
+     * elevation value on a track point are skipped, so re-running the backfill is
+     * safe and only touches the still-broken activities.
+     *
+     * <p>Runs on a single background thread, with progress logged every 100 rows.
+     * A second concurrent invocation returns {@code "already running"} immediately.
+     */
+    @org.springframework.web.bind.annotation.PostMapping("/reprocess-fit-elevation")
+    public org.springframework.http.ResponseEntity<Map<String, String>> reprocessFitElevation() {
+        if (!fitElevationReprocessRunning.compareAndSet(false, true)) {
+            return org.springframework.http.ResponseEntity.ok(Map.of("status", "already running"));
+        }
+
+        new Thread(() -> {
+            try {
+                var ids = activityRepository.findAllIds();
+                log.info("Starting FIT elevation reprocessing for {} activities", ids.size());
+
+                int updated = 0, skipped = 0, failed = 0;
+                for (int i = 0; i < ids.size(); i++) {
+                    try {
+                        var activity = activityRepository.findById(ids.get(i)).orElse(null);
+                        if (activity == null || !"FIT".equals(activity.getSourceFileFormat())) {
+                            skipped++;
+                            continue;
+                        }
+                        if (activityFileService.reprocessFitElevation(activity)) {
+                            updated++;
+                        } else {
+                            skipped++;
+                        }
+                    } catch (Exception e) {
+                        failed++;
+                        log.warn("Failed to reprocess FIT elevation for {}: {}", ids.get(i), e.getMessage());
+                    }
+                    if ((i + 1) % 100 == 0) {
+                        log.info("FIT elevation reprocess progress: {} / {} (updated={}, skipped={}, failed={})",
+                            i + 1, ids.size(), updated, skipped, failed);
+                    }
+                }
+                log.info("FIT elevation reprocessing complete: updated={}, skipped={}, failed={}", updated, skipped, failed);
+            } finally {
+                fitElevationReprocessRunning.set(false);
+            }
+        }, "fit-elevation-reprocess").start();
+
+        return org.springframework.http.ResponseEntity.ok(Map.of("status", "started"));
+    }
 }

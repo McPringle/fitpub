@@ -233,6 +233,102 @@ public class ActivityFileService {
     }
 
     /**
+     * Reprocess elevation for a FIT activity that currently has no per-point
+     * elevation profile. Re-parses the stored raw FIT bytes with the current parser
+     * (which reads {@code enhanced_altitude} in addition to the legacy {@code altitude}
+     * field) and replaces the activity's track-points JSON. Also fills in
+     * {@code elevationGain}/{@code elevationLoss} if they were missing.
+     *
+     * <p>Returns {@code false} (and does not touch the activity) if the activity:
+     * <ul>
+     *   <li>is not a FIT file,</li>
+     *   <li>has no raw file stored (e.g. uploaded before raw file persistence was added),</li>
+     *   <li>already has a non-null elevation value on at least one track point,</li>
+     *   <li>or fails to re-parse for any reason.</li>
+     * </ul>
+     *
+     * @param activity the activity to reprocess
+     * @return true if the track points JSON was updated
+     */
+    @Transactional
+    public boolean reprocessFitElevation(Activity activity) {
+        if (!"FIT".equals(activity.getSourceFileFormat())) {
+            return false;
+        }
+
+        byte[] rawFile = activity.getRawActivityFile();
+        if (rawFile == null || rawFile.length == 0) {
+            log.debug("No raw file stored for FIT activity {}, skipping", activity.getId());
+            return false;
+        }
+
+        // Skip activities that already have per-point elevation. This makes the
+        // backfill idempotent — running it twice in a row is safe and the second
+        // run is a no-op for already-fixed activities.
+        if (trackJsonAlreadyHasElevation(activity.getTrackPointsJson())) {
+            return false;
+        }
+
+        try {
+            ParsedActivityData parsedData = fitParser.parse(rawFile);
+
+            // Replace the entire track points blob. The new JSON will contain
+            // elevation values from enhanced_altitude (or legacy altitude as
+            // fallback) thanks to the FitParser fix.
+            String newJson = convertTrackPointsToJson(parsedData.getTrackPoints());
+            activity.setTrackPointsJson(newJson);
+
+            // Backfill session totals if they were missing. We don't overwrite
+            // existing values — those came from session.getTotalAscent() at upload
+            // time and the device's own calculation is likely more accurate than
+            // anything we'd recompute from the track points.
+            if (activity.getElevationGain() == null && parsedData.getElevationGain() != null) {
+                activity.setElevationGain(parsedData.getElevationGain());
+            }
+            if (activity.getElevationLoss() == null && parsedData.getElevationLoss() != null) {
+                activity.setElevationLoss(parsedData.getElevationLoss());
+            }
+
+            activityRepository.save(activity);
+            log.info("Reprocessed FIT elevation profile for activity {} ({} track points)",
+                activity.getId(), parsedData.getTrackPoints().size());
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed to reprocess FIT elevation for activity {}: {}", activity.getId(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Returns true if the given track points JSON already contains at least one
+     * non-null {@code elevation} value. Used by the FIT elevation backfill to
+     * skip activities that don't need to be touched.
+     */
+    private boolean trackJsonAlreadyHasElevation(String trackPointsJson) {
+        if (trackPointsJson == null || trackPointsJson.isEmpty()) {
+            return false;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(trackPointsJson);
+            if (!root.isArray()) {
+                return false;
+            }
+            for (com.fasterxml.jackson.databind.JsonNode point : root) {
+                com.fasterxml.jackson.databind.JsonNode elevation = point.get("elevation");
+                if (elevation != null && !elevation.isNull()) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            // Malformed JSON shouldn't happen for stored activities, but if it does
+            // err on the side of "no elevation" so the backfill picks it up.
+            log.warn("Could not parse track points JSON to check for elevation: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Detects file format from content and filename.
      * Priority: magic bytes > XML header > file extension
      */
