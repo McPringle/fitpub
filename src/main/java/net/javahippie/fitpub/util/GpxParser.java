@@ -59,9 +59,8 @@ public class GpxParser {
             ParsedActivityData parsedData = new ParsedActivityData();
             parsedData.setSourceFormat("GPX");
 
-            // Parse XML
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
+            // Parse XML using a hardened factory (defends against XXE).
+            DocumentBuilderFactory factory = SecureXmlFactories.newDocumentBuilderFactory(true);
             DocumentBuilder builder = factory.newDocumentBuilder();
             Document doc = builder.parse(new ByteArrayInputStream(fileData));
 

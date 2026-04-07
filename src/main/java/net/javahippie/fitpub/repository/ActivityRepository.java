@@ -369,6 +369,10 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
               OR LOWER(a.description) LIKE LOWER(CONCAT('%', :searchText, '%'))
               OR LOWER(a.activity_location) LIKE LOWER(CONCAT('%', :searchText, '%'))
           ))
+          AND (CAST(:hashtagPattern AS text) IS NULL OR (
+              a.title ~* CAST(:hashtagPattern AS text)
+              OR a.description ~* CAST(:hashtagPattern AS text)
+          ))
         GROUP BY a.id, a.user_id, a.activity_type, a.title, a.description, a.started_at, a.ended_at,
                  a.timezone, a.visibility, a.total_distance, a.total_duration_seconds, a.elevation_gain, a.elevation_loss,
                  a.simplified_track, a.track_points_json, a.created_at, a.updated_at,
@@ -377,6 +381,7 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
         """, nativeQuery = true)
     Page<Object[]> searchPublicTimeline(@Param("visibility") String visibility,
                                          @Param("searchText") String searchText,
+                                         @Param("hashtagPattern") String hashtagPattern,
                                          @Param("currentUserId") UUID currentUserId,
                                          Pageable pageable);
 

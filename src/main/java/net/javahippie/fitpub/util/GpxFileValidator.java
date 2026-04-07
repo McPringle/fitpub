@@ -65,9 +65,8 @@ public class GpxFileValidator {
      */
     private void validateGpxStructure(byte[] fileData) {
         try {
-            // Parse XML to check well-formedness
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
+            // Parse XML to check well-formedness, using a hardened factory (defends against XXE).
+            DocumentBuilderFactory factory = SecureXmlFactories.newDocumentBuilderFactory(true);
             DocumentBuilder builder = factory.newDocumentBuilder();
             Document doc = builder.parse(new ByteArrayInputStream(fileData));
 

@@ -51,17 +51,14 @@ public class AuthController {
                     .body(null);
         }
 
-        // Check registration password if configured
-        // Check for both null and blank (empty or whitespace-only strings)
-        log.debug("Registration password check - configured: '{}', provided: '{}'",
-                 configuredRegistrationPassword, request.getRegistrationPassword());
-
+        // Check registration password if configured.
+        // NEVER log the configured or provided password values — they are credentials.
         if (configuredRegistrationPassword != null && !configuredRegistrationPassword.trim().isEmpty()) {
             String providedPassword = request.getRegistrationPassword();
             if (providedPassword == null || providedPassword.trim().isEmpty() ||
                 !configuredRegistrationPassword.equals(providedPassword)) {
-                log.warn("Registration attempt with invalid registration password for username: {} (expected: '{}', got: '{}')",
-                         request.getUsername(), configuredRegistrationPassword, providedPassword);
+                log.warn("Registration attempt with invalid registration password for username: {}",
+                         request.getUsername());
                 throw new IllegalArgumentException("Invalid registration password");
             }
             log.info("Registration password validated successfully for username: {}", request.getUsername());

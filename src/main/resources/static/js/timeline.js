@@ -9,6 +9,7 @@ const FitPubTimeline = {
     timelineType: 'public',
     searchText: '',
     dateFilter: '',
+    hashtagFilter: '',
     searchDebounceTimer: null,
 
     /**
@@ -17,7 +18,45 @@ const FitPubTimeline = {
      */
     init: function(type) {
         this.timelineType = type;
+
+        // Read hashtag filter from URL query string
+        const params = new URLSearchParams(window.location.search);
+        const hashtagParam = params.get('hashtag');
+        if (hashtagParam && /^\w+$/.test(hashtagParam)) {
+            this.hashtagFilter = hashtagParam;
+        }
+
         this.setupSearchHandlers();
+        this.renderHashtagFilterBadge();
+        this.loadTimeline(0);
+    },
+
+    /**
+     * Show or hide the active hashtag filter badge
+     */
+    renderHashtagFilterBadge: function() {
+        const badge = document.getElementById('hashtagFilterBadge');
+        if (!badge) return;
+
+        if (this.hashtagFilter) {
+            const label = badge.querySelector('#hashtagFilterLabel');
+            if (label) label.textContent = '#' + this.hashtagFilter;
+            badge.classList.remove('d-none');
+        } else {
+            badge.classList.add('d-none');
+        }
+    },
+
+    /**
+     * Clear the active hashtag filter
+     */
+    clearHashtagFilter: function() {
+        this.hashtagFilter = '';
+        this.renderHashtagFilterBadge();
+        // Update URL without reload
+        const url = new URL(window.location.href);
+        url.searchParams.delete('hashtag');
+        window.history.replaceState({}, '', url);
         this.loadTimeline(0);
     },
 
@@ -66,6 +105,10 @@ const FitPubTimeline = {
             // Append search parameters if present
             if (this.searchText) {
                 endpoint += `&search=${encodeURIComponent(this.searchText)}`;
+            }
+
+            if (this.hashtagFilter) {
+                endpoint += `&hashtag=${encodeURIComponent(this.hashtagFilter)}`;
             }
 
             if (this.dateFilter) {
@@ -166,18 +209,14 @@ const FitPubTimeline = {
                         <!-- Activity Title and Description -->
                         <h5 class="card-title">
                             ${activity.isLocal
-                                ? `<a href="/activities/${activity.id}" class="text-decoration-none text-dark">
-                                    ${this.escapeHtml(activity.title || 'Untitled Activity')}
-                                   </a>`
-                                : `<a href="${activity.activityUri || '#'}" target="_blank" class="text-decoration-none text-dark">
-                                    ${this.escapeHtml(activity.title || 'Untitled Activity')}
-                                    <i class="bi bi-box-arrow-up-right ms-1 small"></i>
-                                   </a>`
+                                ? this.renderTitleLinkWithHashtags(activity.title, `/activities/${activity.id}`, 'activity-title-link', '')
+                                : this.renderTitleLinkWithHashtags(activity.title, activity.activityUri || '#', 'activity-title-link', 'target="_blank"')
+                                  + (activity.isLocal ? '' : ' <i class="bi bi-box-arrow-up-right ms-1 small"></i>')
                             }
                         </h5>
 
                         ${activity.description
-                            ? `<p class="card-text">${this.escapeHtml(activity.description).substring(0, 200)}${activity.description.length > 200 ? '...' : ''}</p>`
+                            ? `<p class="card-text">${this.linkifyHashtags(activity.description.length > 200 ? activity.description.substring(0, 200) + '...' : activity.description)}</p>`
                             : ''
                         }
 
@@ -560,6 +599,58 @@ const FitPubTimeline = {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    },
+
+    /**
+     * Escape text for safe HTML insertion AND turn #hashtags into links
+     * pointing to the public timeline filtered by that hashtag.
+     * @param {string} text - Text to process
+     * @returns {string} HTML-safe string with hashtag anchors
+     */
+    linkifyHashtags: function(text) {
+        if (!text) return '';
+        const escaped = this.escapeHtml(text);
+        return escaped.replace(/(^|\s)#(\w+)/g, (match, lead, tag) =>
+            `${lead}<a href="/timeline?hashtag=${encodeURIComponent(tag.toLowerCase())}" class="hashtag-link">#${tag}</a>`
+        );
+    },
+
+    /**
+     * Render a title that links to an activity, with embedded #hashtags
+     * linking instead to the public timeline filtered by that tag.
+     * Avoids invalid nested <a> tags by rendering segments as siblings.
+     * @param {string} text - Title text
+     * @param {string} activityHref - Link target for non-hashtag portions
+     * @param {string} extraClass - Extra CSS classes for the activity link segments
+     * @param {string} extraAttrs - Extra HTML attributes for the activity link segments
+     * @returns {string} HTML
+     */
+    renderTitleLinkWithHashtags: function(text, activityHref, extraClass, extraAttrs) {
+        const safeText = text || 'Untitled Activity';
+        extraClass = extraClass || '';
+        extraAttrs = extraAttrs || '';
+        const wrapActivity = (chunk) =>
+            chunk
+                ? `<a href="${activityHref}" class="text-decoration-none text-dark ${extraClass}" ${extraAttrs}>${chunk}</a>`
+                : '';
+
+        const parts = [];
+        const regex = /(^|\s)#(\w+)/g;
+        let last = 0;
+        let m;
+        while ((m = regex.exec(safeText)) !== null) {
+            // Text before the hashtag (and the leading whitespace) goes to activity
+            const before = safeText.substring(last, m.index) + m[1];
+            if (before) parts.push(wrapActivity(this.escapeHtml(before)));
+            const tag = m[2];
+            parts.push(
+                `<a href="/timeline?hashtag=${encodeURIComponent(tag.toLowerCase())}" class="hashtag-link">#${this.escapeHtml(tag)}</a>`
+            );
+            last = m.index + m[0].length;
+        }
+        const tail = safeText.substring(last);
+        if (tail) parts.push(wrapActivity(this.escapeHtml(tail)));
+        return parts.join('');
     },
 
     /**

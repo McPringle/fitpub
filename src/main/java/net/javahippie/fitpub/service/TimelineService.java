@@ -216,18 +216,27 @@ public class TimelineService {
     public Page<TimelineActivityDTO> searchPublicTimeline(
         UUID userId,
         String searchText,
+        String hashtag,
         Pageable pageable
     ) {
-        log.debug("Searching public timeline (userId: {}, search: {})",
-                  userId, searchText);
+        log.debug("Searching public timeline (userId: {}, search: {}, hashtag: {})",
+                  userId, searchText, hashtag);
 
         // Create unsorted Pageable since ORDER BY is already in the native query
         Pageable unsortedPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+
+        // Build a POSIX regex matching #hashtag as a standalone token (case-insensitive via ~*).
+        // The hashtag value contains only \w characters (extraction enforces this), so no escaping needed.
+        String hashtagPattern = null;
+        if (hashtag != null && !hashtag.isBlank()) {
+            hashtagPattern = "(^|[^[:alnum:]_])#" + hashtag + "([^[:alnum:]_]|$)";
+        }
 
         // Use optimized search query with JOINs and WHERE conditions
         Page<Object[]> results = activityRepository.searchPublicTimeline(
             Activity.Visibility.PUBLIC.name(),
             searchText,
+            hashtagPattern,
             userId,
             unsortedPageable
         );

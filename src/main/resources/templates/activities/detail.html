@@ -519,7 +519,7 @@
 
                 function renderActivity(activity) {
                     // Header
-                    document.getElementById('activityTitle').textContent = activity.title || 'Untitled Activity';
+                    document.getElementById('activityTitle').innerHTML = linkifyHashtags(activity.title || 'Untitled Activity');
                     document.getElementById('activityType').textContent = activity.activityType;
                     document.getElementById('activityType').className = `activity-type-badge activity-type-${activity.activityType.toLowerCase()}`;
                     // Format date with timezone awareness
@@ -570,7 +570,7 @@
 
                     // Description
                     if (activity.description) {
-                        document.getElementById('activityDescription').textContent = activity.description;
+                        document.getElementById('activityDescription').innerHTML = linkifyHashtags(activity.description);
                     } else {
                         document.getElementById('activityDescription').style.display = 'none';
                     }
@@ -1719,6 +1719,14 @@
                     const div = document.createElement('div');
                     div.textContent = text;
                     return div.innerHTML;
+                }
+
+                function linkifyHashtags(text) {
+                    if (!text) return '';
+                    const escaped = escapeHtml(text);
+                    return escaped.replace(/(^|\s)#(\w+)/g, (match, lead, tag) =>
+                        `${lead}<a href="/timeline?hashtag=${encodeURIComponent(tag.toLowerCase())}" class="hashtag-link">#${tag}</a>`
+                    );
                 }
 
                 // Delete functionality

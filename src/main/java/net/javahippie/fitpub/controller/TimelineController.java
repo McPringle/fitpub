@@ -100,14 +100,20 @@ public class TimelineController {
         @AuthenticationPrincipal(errorOnInvalidType = false) UserDetails userDetails,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size,
-        @RequestParam(required = false) String search
+        @RequestParam(required = false) String search,
+        @RequestParam(required = false) String hashtag
     ) {
         UUID userId = null;
         if (userDetails != null) {
             userId = getUserId(userDetails);
-            log.debug("Public timeline request from authenticated user: {} (search: {})", userId, search);
+            log.debug("Public timeline request from authenticated user: {} (search: {}, hashtag: {})", userId, search, hashtag);
         } else {
-            log.debug("Public timeline request (unauthenticated) (search: {})", search);
+            log.debug("Public timeline request (unauthenticated) (search: {}, hashtag: {})", search, hashtag);
+        }
+
+        // Reject malformed hashtags (extraction only allows \w)
+        if (hashtag != null && !hashtag.matches("\\w+")) {
+            hashtag = null;
         }
 
         // Sort by activity start date descending (latest first)
@@ -115,9 +121,9 @@ public class TimelineController {
 
         // Use search if filters provided, otherwise use standard timeline
         Page<TimelineActivityDTO> timeline;
-        if (search != null) {
+        if (search != null || hashtag != null) {
             timeline = timelineService.searchPublicTimeline(
-                userId, search, pageable
+                userId, search, hashtag, pageable
             );
         } else {
             timeline = timelineService.getPublicTimeline(userId, pageable);

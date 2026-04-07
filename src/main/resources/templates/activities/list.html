@@ -152,9 +152,7 @@
                                 <div class="row">
                                     <div class="col-md-8">
                                         <h5 class="card-title">
-                                            <a href="/activities/${activity.id}" class="text-decoration-none">
-                                                ${escapeHtml(activity.title || 'Untitled Activity')}
-                                            </a>
+                                            ${renderTitleLinkWithHashtags(activity.title, `/activities/${activity.id}`)}
                                         </h5>
                                         <p class="text-muted mb-2">
                                             <span class="activity-type-badge activity-type-${activity.activityType.toLowerCase()}${activity.race ? ' race-activity' : ''}">
@@ -181,7 +179,7 @@
                                                 ${activity.visibility}
                                             </span>
                                         </p>
-                                        ${activity.description ? `<p class="card-text">${escapeHtml(activity.description).substring(0, 150)}${activity.description.length > 150 ? '...' : ''}</p>` : ''}
+                                        ${activity.description ? `<p class="card-text">${linkifyHashtags(activity.description.length > 150 ? activity.description.substring(0, 150) + '...' : activity.description)}</p>` : ''}
                                     </div>
                                     <div class="col-md-4">
                                         <small class="text-muted">
@@ -331,6 +329,35 @@
                     const div = document.createElement('div');
                     div.textContent = text;
                     return div.innerHTML;
+                }
+
+                function linkifyHashtags(text) {
+                    if (!text) return '';
+                    const escaped = escapeHtml(text);
+                    return escaped.replace(/(^|\s)#(\w+)/g, (match, lead, tag) =>
+                        `${lead}<a href="/timeline?hashtag=${encodeURIComponent(tag.toLowerCase())}" class="hashtag-link">#${tag}</a>`
+                    );
+                }
+
+                function renderTitleLinkWithHashtags(text, activityHref) {
+                    const safeText = text || 'Untitled Activity';
+                    const wrap = (chunk) => chunk
+                        ? `<a href="${activityHref}" class="text-decoration-none activity-title-link">${chunk}</a>`
+                        : '';
+                    const parts = [];
+                    const regex = /(^|\s)#(\w+)/g;
+                    let last = 0;
+                    let m;
+                    while ((m = regex.exec(safeText)) !== null) {
+                        const before = safeText.substring(last, m.index) + m[1];
+                        if (before) parts.push(wrap(escapeHtml(before)));
+                        const tag = m[2];
+                        parts.push(`<a href="/timeline?hashtag=${encodeURIComponent(tag.toLowerCase())}" class="hashtag-link">#${escapeHtml(tag)}</a>`);
+                        last = m.index + m[0].length;
+                    }
+                    const tail = safeText.substring(last);
+                    if (tail) parts.push(wrap(escapeHtml(tail)));
+                    return parts.join('');
                 }
             });
         </script>
