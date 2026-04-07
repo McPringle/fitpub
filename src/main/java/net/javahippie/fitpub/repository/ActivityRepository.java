@@ -171,17 +171,26 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
     java.math.BigDecimal sumElevationGainByUserId(@Param("userId") UUID userId);
 
     /**
-     * Count activities by user and start time before a specific time.
+     * Count activities by user where the start time-of-day is before a specific time.
+     *
+     * <p>Uses the portable HQL {@code cast(... as time)} expression rather than
+     * {@code FUNCTION('TIME', ...)}: the latter calls a database-native function named
+     * {@code time}, which works on H2/MySQL but breaks on PostgreSQL — there {@code time}
+     * is a reserved type name and {@code time(column)} is parsed as an invalid type
+     * modifier, producing "syntax error at or near ...". {@code cast(x as time)} is
+     * standard HQL and Hibernate translates it to the dialect's native cast.
      */
     @Query("SELECT COUNT(a) FROM Activity a WHERE a.userId = :userId " +
-           "AND FUNCTION('TIME', a.startedAt) < :time")
+           "AND cast(a.startedAt as time) < :time")
     long countByUserIdAndStartTimeBefore(@Param("userId") UUID userId, @Param("time") java.time.LocalTime time);
 
     /**
-     * Count activities by user and start time after a specific time.
+     * Count activities by user where the start time-of-day is after a specific time.
+     * See {@link #countByUserIdAndStartTimeBefore} for why we use {@code cast} rather
+     * than {@code FUNCTION('TIME', ...)}.
      */
     @Query("SELECT COUNT(a) FROM Activity a WHERE a.userId = :userId " +
-           "AND FUNCTION('TIME', a.startedAt) > :time")
+           "AND cast(a.startedAt as time) > :time")
     long countByUserIdAndStartTimeAfter(@Param("userId") UUID userId, @Param("time") java.time.LocalTime time);
 
     /**
