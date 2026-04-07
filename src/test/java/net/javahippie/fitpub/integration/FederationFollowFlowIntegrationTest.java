@@ -12,6 +12,7 @@ import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.RemoteActorRepository;
 import net.javahippie.fitpub.repository.UserRepository;
+import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,6 +69,9 @@ class FederationFollowFlowIntegrationTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private HttpSignatureValidator signatureValidator;
+
     @Value("${fitpub.base-url}")
     private String baseUrl;
 
@@ -113,6 +117,68 @@ class FederationFollowFlowIntegrationTest {
         return "-----BEGIN PRIVATE KEY-----\n" + base64 + "\n-----END PRIVATE KEY-----";
     }
 
+    /**
+     * Test fixture pairing a persisted RemoteActor with the keypair the test should use
+     * to sign inbox requests on its behalf.
+     */
+    private record SignedRemoteActor(RemoteActor actor, KeyPair keyPair) {
+        String keyId() {
+            return actor.getActorUri() + "#main-key";
+        }
+    }
+
+    /**
+     * Creates a remote actor backed by a real RSA keypair, persists it with the matching
+     * public key PEM, and returns both. Because {@code lastFetchedAt} is set to now, the
+     * controller's federation service will use the cached row instead of making an HTTP
+     * call to the remote actor URI during signature verification.
+     */
+    private SignedRemoteActor createSignedRemoteActor(String actorUri, String username,
+                                                      String domain, String displayName)
+            throws NoSuchAlgorithmException {
+        KeyPair keyPair = generateRsaKeyPair();
+        String publicKeyPem = encodePublicKey(keyPair.getPublic().getEncoded());
+        RemoteActor actor = RemoteActor.builder()
+            .actorUri(actorUri)
+            .username(username)
+            .domain(domain)
+            .displayName(displayName)
+            .inboxUrl(actorUri + "/inbox")
+            .outboxUrl(actorUri + "/outbox")
+            .publicKey(publicKeyPem)
+            .publicKeyId(actorUri + "#main-key")
+            .lastFetchedAt(Instant.now())
+            .build();
+        return new SignedRemoteActor(remoteActorRepository.save(actor), keyPair);
+    }
+
+    /**
+     * Posts the given activity payload to {@code /users/{username}/inbox} with a valid
+     * HTTP-Signature, exactly as a real federated server would. The Host header is set
+     * to {@code localhost} so it matches what {@link HttpSignatureValidator#signRequest}
+     * derives from the inbox URL.
+     */
+    private org.springframework.test.web.servlet.ResultActions performSignedInboxPost(
+            String recipientUsername, Map<String, Object> activity, SignedRemoteActor sender)
+            throws Exception {
+        String body = objectMapper.writeValueAsString(activity);
+        String inboxPath = "/users/" + recipientUsername + "/inbox";
+        // signRequest derives host from this URL via URI.getHost(); the Host header on the
+        // mock request must match.
+        String inboxUrl = "http://localhost" + inboxPath;
+        String privateKeyPem = encodePrivateKey(sender.keyPair().getPrivate().getEncoded());
+        HttpSignatureValidator.SignatureHeaders sigHeaders = signatureValidator.signRequest(
+            "POST", inboxUrl, body, privateKeyPem, sender.keyId()
+        );
+        return mockMvc.perform(post(inboxPath)
+                .contentType("application/activity+json")
+                .header("Host", sigHeaders.host)
+                .header("Date", sigHeaders.date)
+                .header("Digest", sigHeaders.digest)
+                .header("Signature", sigHeaders.signature)
+                .content(body));
+    }
+
     @Test
     @Disabled("Requires mocking external HTTP calls to WebFinger and remote ActivityPub servers")
     @DisplayName("Should follow a remote user via handle format @username@domain")
@@ -140,18 +206,9 @@ class FederationFollowFlowIntegrationTest {
     @Test
     @DisplayName("Should process incoming Follow activity and create follow relationship")
     void testProcessIncomingFollowActivity() throws Exception {
-        // Create a remote actor
-        RemoteActor remoteActor = RemoteActor.builder()
-            .actorUri("https://remote.example/users/bob")
-            .username("bob")
-            .domain("remote.example")
-            .displayName("Bob Remote")
-            .inboxUrl("https://remote.example/users/bob/inbox")
-            .outboxUrl("https://remote.example/users/bob/outbox")
-            .publicKey("-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----")
-            .lastFetchedAt(Instant.now())
-            .build();
-        remoteActor = remoteActorRepository.save(remoteActor);
+        SignedRemoteActor sender = createSignedRemoteActor(
+            "https://remote.example/users/bob", "bob", "remote.example", "Bob Remote"
+        );
 
         // Create Follow activity
         String followId = "https://remote.example/activities/follow/" + UUID.randomUUID();
@@ -159,20 +216,18 @@ class FederationFollowFlowIntegrationTest {
             "@context", "https://www.w3.org/ns/activitystreams",
             "type", "Follow",
             "id", followId,
-            "actor", remoteActor.getActorUri(),
+            "actor", sender.actor().getActorUri(),
             "object", baseUrl + "/users/" + testUser.getUsername(),
             "published", Instant.now().toString()
         );
 
-        // Post to inbox (without signature validation for test)
-        mockMvc.perform(post("/users/" + testUser.getUsername() + "/inbox")
-                .contentType("application/activity+json")
-                .content(objectMapper.writeValueAsString(followActivity)))
+        // Post to inbox with a valid HTTP signature
+        performSignedInboxPost(testUser.getUsername(), followActivity, sender)
             .andExpect(status().isAccepted());
 
         // Verify follow relationship was created
         Follow follow = followRepository.findByRemoteActorUriAndFollowingActorUri(
-            remoteActor.getActorUri(),
+            sender.actor().getActorUri(),
             baseUrl + "/users/" + testUser.getUsername()
         ).orElse(null);
 
@@ -183,24 +238,15 @@ class FederationFollowFlowIntegrationTest {
     @Test
     @DisplayName("Should process Accept activity and update follow status to ACCEPTED")
     void testProcessAcceptActivity() throws Exception {
-        // Create a remote actor
-        RemoteActor remoteActor = RemoteActor.builder()
-            .actorUri("https://remote.example/users/carol")
-            .username("carol")
-            .domain("remote.example")
-            .displayName("Carol Remote")
-            .inboxUrl("https://remote.example/users/carol/inbox")
-            .outboxUrl("https://remote.example/users/carol/outbox")
-            .publicKey("-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----")
-            .lastFetchedAt(Instant.now())
-            .build();
-        remoteActor = remoteActorRepository.save(remoteActor);
+        SignedRemoteActor sender = createSignedRemoteActor(
+            "https://remote.example/users/carol", "carol", "remote.example", "Carol Remote"
+        );
 
         // Create pending follow
         String followActivityId = baseUrl + "/activities/follow/" + UUID.randomUUID();
         Follow pendingFollow = Follow.builder()
             .followerId(testUser.getId())
-            .followingActorUri(remoteActor.getActorUri())
+            .followingActorUri(sender.actor().getActorUri())
             .status(Follow.FollowStatus.PENDING)
             .activityId(followActivityId)
             .build();
@@ -211,14 +257,12 @@ class FederationFollowFlowIntegrationTest {
             "@context", "https://www.w3.org/ns/activitystreams",
             "type", "Accept",
             "id", "https://remote.example/activities/accept/" + UUID.randomUUID(),
-            "actor", remoteActor.getActorUri(),
+            "actor", sender.actor().getActorUri(),
             "object", followActivityId
         );
 
-        // Post Accept to inbox
-        mockMvc.perform(post("/users/" + testUser.getUsername() + "/inbox")
-                .contentType("application/activity+json")
-                .content(objectMapper.writeValueAsString(acceptActivity)))
+        // Post Accept to inbox with a valid HTTP signature
+        performSignedInboxPost(testUser.getUsername(), acceptActivity, sender)
             .andExpect(status().isAccepted());
 
         // Verify follow status was updated to ACCEPTED
@@ -227,24 +271,55 @@ class FederationFollowFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("Should reject inbox POST without HTTP signature with 401")
+    void testInboxRejectsUnsignedRequest() throws Exception {
+        Map<String, Object> followActivity = Map.of(
+            "@context", "https://www.w3.org/ns/activitystreams",
+            "type", "Follow",
+            "id", "https://remote.example/activities/follow/" + UUID.randomUUID(),
+            "actor", "https://remote.example/users/bob",
+            "object", baseUrl + "/users/" + testUser.getUsername()
+        );
+
+        mockMvc.perform(post("/users/" + testUser.getUsername() + "/inbox")
+                .contentType("application/activity+json")
+                .content(objectMapper.writeValueAsString(followActivity)))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Should reject inbox POST when activity actor host does not match signing key host")
+    void testInboxRejectsActorHostMismatch() throws Exception {
+        // The signing actor lives on remote.example, but the activity claims to be from
+        // someone on impostor.example. The controller must reject this with 401 to
+        // prevent one federated server impersonating users on another.
+        SignedRemoteActor sender = createSignedRemoteActor(
+            "https://remote.example/users/bob", "bob", "remote.example", "Bob Remote"
+        );
+
+        Map<String, Object> followActivity = Map.of(
+            "@context", "https://www.w3.org/ns/activitystreams",
+            "type", "Follow",
+            "id", "https://remote.example/activities/follow/" + UUID.randomUUID(),
+            // Forged: claims to be from a user on a completely different host
+            "actor", "https://impostor.example/users/eve",
+            "object", baseUrl + "/users/" + testUser.getUsername()
+        );
+
+        performSignedInboxPost(testUser.getUsername(), followActivity, sender)
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("Should process Undo Follow activity and remove follow relationship")
     void testProcessUndoFollowActivity() throws Exception {
-        // Create a remote actor
-        RemoteActor remoteActor = RemoteActor.builder()
-            .actorUri("https://remote.example/users/dave")
-            .username("dave")
-            .domain("remote.example")
-            .displayName("Dave Remote")
-            .inboxUrl("https://remote.example/users/dave/inbox")
-            .outboxUrl("https://remote.example/users/dave/outbox")
-            .publicKey("-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----")
-            .lastFetchedAt(Instant.now())
-            .build();
-        remoteActor = remoteActorRepository.save(remoteActor);
+        SignedRemoteActor sender = createSignedRemoteActor(
+            "https://remote.example/users/dave", "dave", "remote.example", "Dave Remote"
+        );
 
         // Create accepted follow
         Follow acceptedFollow = Follow.builder()
-            .remoteActorUri(remoteActor.getActorUri())
+            .remoteActorUri(sender.actor().getActorUri())
             .followingActorUri(baseUrl + "/users/" + testUser.getUsername())
             .status(Follow.FollowStatus.ACCEPTED)
             .build();
@@ -255,18 +330,16 @@ class FederationFollowFlowIntegrationTest {
             "@context", "https://www.w3.org/ns/activitystreams",
             "type", "Undo",
             "id", "https://remote.example/activities/undo/" + UUID.randomUUID(),
-            "actor", remoteActor.getActorUri(),
+            "actor", sender.actor().getActorUri(),
             "object", Map.of(
                 "type", "Follow",
-                "actor", remoteActor.getActorUri(),
+                "actor", sender.actor().getActorUri(),
                 "object", baseUrl + "/users/" + testUser.getUsername()
             )
         );
 
-        // Post Undo to inbox
-        mockMvc.perform(post("/users/" + testUser.getUsername() + "/inbox")
-                .contentType("application/activity+json")
-                .content(objectMapper.writeValueAsString(undoActivity)))
+        // Post Undo to inbox with a valid HTTP signature
+        performSignedInboxPost(testUser.getUsername(), undoActivity, sender)
             .andExpect(status().isAccepted());
 
         // Verify follow was deleted

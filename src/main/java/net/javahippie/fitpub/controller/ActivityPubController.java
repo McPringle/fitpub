@@ -1,15 +1,21 @@
 package net.javahippie.fitpub.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.activitypub.Actor;
 import net.javahippie.fitpub.model.activitypub.OrderedCollection;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.RemoteActor;
 import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.UserRepository;
+import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.InboxProcessor;
 import net.javahippie.fitpub.util.ActivityFormatter;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,7 +25,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * ActivityPub protocol controller.
@@ -37,12 +48,18 @@ public class ActivityPubController {
     private final ActivityImageService activityImageService;
     private final InboxProcessor inboxProcessor;
     private final FollowRepository followRepository;
+    private final HttpSignatureValidator signatureValidator;
+    private final FederationService federationService;
+    private final ObjectMapper objectMapper;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
 
     private static final String ACTIVITY_JSON = "application/activity+json";
     private static final String LD_JSON = "application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\"";
+
+    /** Matches the keyId field of an HTTP Signature header. */
+    private static final Pattern SIGNATURE_KEY_ID_PATTERN = Pattern.compile("keyId=\"([^\"]+)\"");
 
     /**
      * Actor profile endpoint.
@@ -74,9 +91,23 @@ public class ActivityPubController {
      * Inbox endpoint for receiving ActivityPub activities.
      * POST /users/{username}/inbox
      *
-     * @param username the username
-     * @param activity the incoming activity
-     * @return accepted response
+     * <p>Performs full HTTP-Signature validation on every incoming request:
+     * <ol>
+     *   <li>Reject if {@code Signature} or {@code Digest} headers are missing.</li>
+     *   <li>Verify the {@code Digest} header actually matches the body's SHA-256 hash.</li>
+     *   <li>Resolve the signing key by fetching the actor referenced in {@code keyId}.</li>
+     *   <li>Verify the request signature with the actor's public key.</li>
+     *   <li>Bind the activity's {@code actor} field to the signing key's host so a federated
+     *       server cannot deliver activities on behalf of users on a different host.</li>
+     * </ol>
+     * Any failure of steps 1–5 produces a 401. Transient upstream failures (cannot fetch the
+     * actor) produce 502 so the sender will retry per ActivityPub spec.
+     *
+     * @param username the local recipient username
+     * @param body the raw request body bytes (preserved for digest verification)
+     * @param request the inbound request, used for header collection and request-target
+     * @return 202 Accepted on success, 401 Unauthorized on signature failures, 502 on upstream
+     *         failures, 400 on malformed JSON
      */
     @PostMapping(
         value = "/users/{username}/inbox",
@@ -84,22 +115,166 @@ public class ActivityPubController {
     )
     public ResponseEntity<Void> inbox(
         @PathVariable String username,
-        @RequestBody Map<String, Object> activity,
-        @RequestHeader(value = "Signature", required = false) String signature
+        @RequestBody byte[] body,
+        HttpServletRequest request
     ) {
-        log.info("Received ActivityPub activity for user {}: {}", username, activity.get("type"));
+        // 1. Signature header required
+        String signatureHeader = request.getHeader("Signature");
+        if (signatureHeader == null || signatureHeader.isBlank()) {
+            log.warn("Inbox request for user {} missing Signature header", username);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
 
-        // TODO: Validate HTTP signature (signature validation can be added later)
+        // 2. Digest header required and must actually match the body.
+        // The signature covers the digest header value, but verifying the digest against the
+        // real body closes the loop: an attacker who lifted a signed envelope cannot swap the
+        // payload underneath it.
+        String digestHeader = request.getHeader("Digest");
+        if (digestHeader == null || digestHeader.isBlank()) {
+            log.warn("Inbox request for user {} missing Digest header", username);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        String expectedDigest = computeSha256Digest(body);
+        if (!expectedDigest.equals(digestHeader.trim())) {
+            log.warn("Inbox request for user {}: Digest header does not match body hash", username);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
 
-        // Process activity asynchronously to avoid blocking the sender
+        // 3. Extract the keyId from the signature header
+        String keyId = extractKeyId(signatureHeader);
+        if (keyId == null) {
+            log.warn("Inbox request for user {}: Signature header has no keyId", username);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // The keyId is conventionally "https://example.com/users/alice#main-key"; strip
+        // the fragment to get the actor URI we should fetch.
+        String actorUriFromKey = keyId.contains("#") ? keyId.substring(0, keyId.indexOf('#')) : keyId;
+        URI keyHostUri;
+        try {
+            keyHostUri = new URI(actorUriFromKey);
+            if (keyHostUri.getHost() == null) {
+                throw new URISyntaxException(actorUriFromKey, "missing host");
+            }
+        } catch (URISyntaxException e) {
+            log.warn("Inbox request for user {}: keyId is not a valid URI: {}", username, keyId);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // 4. Fetch the actor and obtain their public key
+        String publicKeyPem;
+        try {
+            RemoteActor remoteActor = federationService.fetchRemoteActor(actorUriFromKey);
+            publicKeyPem = remoteActor.getPublicKey();
+        } catch (Exception e) {
+            // Couldn't reach upstream — treat as transient and let them retry
+            log.warn("Inbox request for user {}: failed to fetch remote actor {} for signature verification",
+                username, actorUriFromKey, e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        if (publicKeyPem == null || publicKeyPem.isBlank()) {
+            log.warn("Inbox request for user {}: remote actor {} has no public key",
+                username, actorUriFromKey);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // 5. Verify the signature against all the headers it claims to cover
+        Map<String, String> headers = collectHeaders(request);
+        if (!signatureValidator.validate(signatureHeader, headers, publicKeyPem)) {
+            log.warn("Inbox request for user {}: HTTP signature verification failed (signed by {})",
+                username, actorUriFromKey);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // 6. Parse the JSON payload (only after the signature is verified, so we don't
+        // waste cycles on unauthenticated input)
+        Map<String, Object> activity;
+        try {
+            activity = objectMapper.readValue(body, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("Inbox request for user {}: malformed JSON payload", username, e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        // 7. Bind the activity's actor field to the signing key host. Without this check,
+        // a federated server signing as one of its own actors could deliver activities
+        // claiming to be from any other server's user.
+        Object actorField = activity.get("actor");
+        String activityActorUri = actorField instanceof String ? (String) actorField : null;
+        if (activityActorUri == null || activityActorUri.isBlank()) {
+            log.warn("Inbox request for user {}: activity is missing a string actor field", username);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        try {
+            URI actorUri = new URI(activityActorUri);
+            String activityHost = actorUri.getHost();
+            if (activityHost == null
+                || !activityHost.equalsIgnoreCase(keyHostUri.getHost())) {
+                log.warn("Inbox request for user {}: activity actor host '{}' does not match signing key host '{}'",
+                    username, activityHost, keyHostUri.getHost());
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            }
+        } catch (URISyntaxException e) {
+            log.warn("Inbox request for user {}: activity actor URI is invalid: {}",
+                username, activityActorUri);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        log.info("Received signed ActivityPub activity for user {}: {} from {}",
+            username, activity.get("type"), activityActorUri);
+
+        // 8. Hand off to the processor. Errors here are logged but do not affect the
+        // ack we send back to the federated server (per ActivityPub spec, the inbox
+        // returns 202 Accepted once the message is queued for processing).
         try {
             inboxProcessor.processActivity(username, activity);
         } catch (Exception e) {
             log.error("Error processing inbox activity", e);
         }
 
-        // Always return 202 Accepted per ActivityPub spec
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
+    }
+
+    /**
+     * Computes the SHA-256 digest of the request body in the format used by the HTTP
+     * Signatures spec ({@code "SHA-256=" + base64(sha256(body))}).
+     */
+    private static String computeSha256Digest(byte[] body) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return "SHA-256=" + Base64.getEncoder().encodeToString(md.digest(body));
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is required by every JRE; this branch is unreachable.
+            throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
+    }
+
+    /** Extracts the {@code keyId} value from a Signature header. */
+    private static String extractKeyId(String signatureHeader) {
+        var matcher = SIGNATURE_KEY_ID_PATTERN.matcher(signatureHeader);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    /**
+     * Collects request headers (lowercased) plus the synthetic {@code (request-target)}
+     * pseudo-header used by HTTP Signatures.
+     */
+    private static Map<String, String> collectHeaders(HttpServletRequest request) {
+        Map<String, String> headers = new HashMap<>();
+        Enumeration<String> names = request.getHeaderNames();
+        while (names.hasMoreElements()) {
+            String name = names.nextElement();
+            headers.put(name.toLowerCase(Locale.ROOT), request.getHeader(name));
+        }
+        // Synthetic pseudo-header: "<method-lowercase> <path-with-query>"
+        String path = request.getRequestURI();
+        String query = request.getQueryString();
+        if (query != null && !query.isEmpty()) {
+            path = path + "?" + query;
+        }
+        headers.put("(request-target)",
+            request.getMethod().toLowerCase(Locale.ROOT) + " " + path);
+        return headers;
     }
 
     /**
