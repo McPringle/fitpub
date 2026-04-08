@@ -82,10 +82,15 @@ class ActivityImageServiceTest {
         System.out.println("  Total distance: " + parsedData.getTotalDistance() + " m");
         System.out.println("  Total duration: " + parsedData.getTotalDuration());
 
-        // Create a test user with required fields
+        // Create a test user with required fields. Both username and email are
+        // suffixed with the current time so re-running the test doesn't collide
+        // with rows left behind by previous (failed) runs — the test is not
+        // @Transactional and intentionally leaves the user/activity in the DB
+        // so the generated image can be inspected against real persisted state.
+        long uniq = System.currentTimeMillis();
         User testUser = new User();
-        testUser.setUsername("testuser_" + System.currentTimeMillis());
-        testUser.setEmail("test@example.com");
+        testUser.setUsername("testuser_" + uniq);
+        testUser.setEmail("test_" + uniq + "@example.com");
         testUser.setPasswordHash("hashedpassword");
         testUser.setDisplayName("Test User");
         testUser.setEnabled(true);
@@ -94,7 +99,9 @@ class ActivityImageServiceTest {
         testUser.setPrivateKey("-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC\n-----END PRIVATE KEY-----");
         testUser = userRepository.save(testUser);
 
-        // Create a test activity entity
+        // Create a test activity entity. sourceFileFormat is required by the
+        // schema (V15 made it NOT NULL with a CHECK constraint allowing only
+        // 'FIT' or 'GPX'); this test parses a FIT file so 'FIT' is correct.
         Activity activity = Activity.builder()
                 .id(UUID.randomUUID())
                 .userId(testUser.getId())
@@ -105,6 +112,7 @@ class ActivityImageServiceTest {
                 .endedAt(parsedData.getEndTime())
                 .timezone(parsedData.getTimezone())
                 .visibility(Activity.Visibility.PUBLIC)
+                .sourceFileFormat("FIT")
                 .totalDistance(parsedData.getTotalDistance())
                 .totalDurationSeconds(parsedData.getTotalDuration() != null ? parsedData.getTotalDuration().getSeconds() : null)
                 .elevationGain(parsedData.getElevationGain())

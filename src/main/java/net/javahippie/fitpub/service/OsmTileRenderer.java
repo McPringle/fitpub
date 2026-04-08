@@ -191,8 +191,11 @@ public class OsmTileRenderer {
             drawY = 0;
         }
 
-        // Fill background with neutral gray
-        g.setColor(new Color(240, 240, 240));
+        // Fill the letterbox margins with the FitPub dark background so the
+        // square share-image map blends seamlessly into the dark stats panel.
+        // (Was previously a neutral light gray that produced visible bars
+        // around non-square routes.)
+        g.setColor(new Color(0x0f, 0x05, 0x20));
         g.fillRect(0, 0, width, height);
 
         // Draw scaled image centered with preserved aspect ratio

@@ -473,7 +473,12 @@ public class ActivityPubController {
             imageAttachment.put("type", "Image");
             imageAttachment.put("mediaType", "image/png");
             imageAttachment.put("url", imageUrl);
-            imageAttachment.put("name", "Activity map showing " + activity.getActivityType() + " route");
+            // The "name" field on an Image attachment is what Mastodon, other
+            // ActivityPub servers, and screen readers expose as the image
+            // description. Build a real prose description from the activity
+            // data instead of the previous "Activity map showing X route"
+            // placeholder. See ActivityImageService.buildImageAltText.
+            imageAttachment.put("name", activityImageService.buildImageAltText(activity));
             noteObject.put("attachment", List.of(imageAttachment));
         }
 

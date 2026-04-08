@@ -233,7 +233,11 @@ public class ActivityPostProcessingService {
                 imageAttachment.put("type", "Image");
                 imageAttachment.put("mediaType", "image/png");
                 imageAttachment.put("url", imageUrl);
-                imageAttachment.put("name", "Activity map showing " + activity.getActivityType() + " route");
+                // The "name" field on an Image attachment is what Mastodon and
+                // other ActivityPub servers expose as the image description /
+                // alt text. Build it from the same data the visual renderer
+                // uses so the two stay in sync.
+                imageAttachment.put("name", activityImageService.buildImageAltText(activity));
                 noteObject.put("attachment", List.of(imageAttachment));
             }
 
