@@ -219,13 +219,25 @@ public class ActivityPostProcessingService {
             }
 
             // Set visibility (to/cc fields)
+            String quoteAudience;
             if (activity.getVisibility() == Activity.Visibility.PUBLIC) {
                 noteObject.put("to", List.of("https://www.w3.org/ns/activitystreams#Public"));
                 noteObject.put("cc", List.of(actorUri + "/followers"));
+                quoteAudience = "https://www.w3.org/ns/activitystreams#Public";
             } else {
                 // FOLLOWERS only
                 noteObject.put("to", List.of(actorUri + "/followers"));
+                quoteAudience = actorUri + "/followers";
             }
+
+            // Tell Mastodon (and other servers that implement FEP-5e53) that
+            // this post can be quoted by the same audience that can see it.
+            // Without this declaration Mastodon defaults to denying quotes
+            // for cross-server posts, which surfaces as `quote_approval.current_user
+            // == "denied"` in its API. The matching extension field declarations
+            // live on the surrounding Create's `@context` (set by FederationService).
+            noteObject.put("interactionPolicy",
+                net.javahippie.fitpub.util.ActivityPubContexts.quotePolicyAllowing(quoteAudience));
 
             // Attach activity image if generated
             if (imageUrl != null) {
@@ -259,51 +271,71 @@ public class ActivityPostProcessingService {
     }
 
     /**
-     * Format activity content as HTML for ActivityPub Note.
-     * Mastodon and most Fediverse software expect HTML in the content field.
-     * Hashtags in user text are converted to proper HTML links.
+     * Format activity content as HTML for the ActivityPub Note. Output is
+     * intentionally minimal because the bulk of the activity data is already
+     * in the share image attachment (and its alt text). The body provides:
+     * the title (bold), a one-line context summary as a fallback for clients
+     * that don't render image attachments, and the user-written description
+     * (with hashtags linkified).
      */
     private String formatActivityContent(Activity activity) {
         StringBuilder content = new StringBuilder();
 
         if (activity.getTitle() != null && !activity.getTitle().isEmpty()) {
-            content.append("<p><strong>").append(linkifyHashtags(escapeHtml(activity.getTitle()))).append("</strong></p>");
+            content.append("<p><strong>")
+                   .append(linkifyHashtags(escapeHtml(activity.getTitle())))
+                   .append("</strong></p>");
+        }
+
+        // One-line summary (sport · distance · duration). Fallback for clients
+        // that don't render the image attachment, and a quick at-a-glance line
+        // even for clients that do.
+        String summary = buildSummaryLine(activity);
+        if (!summary.isEmpty()) {
+            content.append("<p>").append(summary).append("</p>");
         }
 
         if (activity.getDescription() != null && !activity.getDescription().isEmpty()) {
-            content.append("<p>").append(linkifyHashtags(escapeHtml(activity.getDescription()))).append("</p>");
-        }
-
-        String activityEmoji = getActivityEmoji(activity.getActivityType());
-        String formattedType = ActivityFormatter.formatActivityType(activity.getActivityType());
-        content.append("<p>").append(activityEmoji).append(" ").append(escapeHtml(formattedType)).append("</p>");
-
-        StringBuilder metrics = new StringBuilder();
-        if (activity.getTotalDistance() != null) {
-            metrics.append("📏 ")
-                .append(String.format("%.2f km", activity.getTotalDistance().doubleValue() / 1000.0))
-                .append("<br>");
-        }
-        if (activity.getTotalDurationSeconds() != null) {
-            long hours = activity.getTotalDurationSeconds() / 3600;
-            long minutes = (activity.getTotalDurationSeconds() % 3600) / 60;
-            long seconds = activity.getTotalDurationSeconds() % 60;
-            metrics.append("⏱️ ");
-            if (hours > 0) {
-                metrics.append(hours).append("h ");
-            }
-            metrics.append(minutes).append("m ").append(seconds).append("s").append("<br>");
-        }
-        if (activity.getElevationGain() != null) {
-            metrics.append("⛰️ ")
-                .append(String.format("%.0f m", activity.getElevationGain()))
-                .append("<br>");
-        }
-        if (metrics.length() > 0) {
-            content.append("<p>").append(metrics).append("</p>");
+            content.append("<p>")
+                   .append(linkifyHashtags(escapeHtml(activity.getDescription())))
+                   .append("</p>");
         }
 
         return content.toString();
+    }
+
+    /**
+     * Build a one-line plain summary like "Run · 6.52 km · 43:30". Skips any
+     * field that's null or zero so indoor activities (no distance) just show
+     * "Indoor cycling · 45:12". Returns "" if absolutely nothing is available.
+     */
+    private String buildSummaryLine(Activity activity) {
+        java.util.List<String> parts = new java.util.ArrayList<>();
+
+        String type = ActivityFormatter.formatActivityType(activity.getActivityType());
+        if (type != null && !type.isEmpty()) {
+            parts.add(escapeHtml(type));
+        }
+
+        if (activity.getTotalDistance() != null
+            && activity.getTotalDistance().doubleValue() > 0) {
+            parts.add(String.format("%.2f km", activity.getTotalDistance().doubleValue() / 1000.0));
+        }
+
+        if (activity.getTotalDurationSeconds() != null
+            && activity.getTotalDurationSeconds() > 0) {
+            long s = activity.getTotalDurationSeconds();
+            long h = s / 3600;
+            long m = (s % 3600) / 60;
+            long sec = s % 60;
+            if (h > 0) {
+                parts.add(String.format("%d:%02d:%02d", h, m, sec));
+            } else {
+                parts.add(String.format("%d:%02d", m, sec));
+            }
+        }
+
+        return String.join(" · ", parts);
     }
 
     private static final java.util.regex.Pattern HASHTAG_PATTERN =
@@ -347,28 +379,4 @@ public class ActivityPostProcessingService {
                    .replace("\"", "&quot;");
     }
 
-    /**
-     * Get an emoji for the activity type.
-     *
-     * @param type the activity type
-     * @return emoji representing the activity type
-     */
-    private String getActivityEmoji(Activity.ActivityType type) {
-        return switch (type) {
-            case RUN -> "🏃";
-            case RIDE -> "🚴";
-            case HIKE -> "🥾";
-            case WALK -> "🚶";
-            case SWIM -> "🏊";
-            case ALPINE_SKI, BACKCOUNTRY_SKI, NORDIC_SKI -> "⛷️";
-            case SNOWBOARD -> "🏂";
-            case ROWING -> "🚣";
-            case KAYAKING, CANOEING -> "🛶";
-            case INLINE_SKATING -> "⛸️";
-            case ROCK_CLIMBING, MOUNTAINEERING -> "🧗";
-            case YOGA -> "🧘";
-            case WORKOUT -> "💪";
-            default -> "🏋️";
-        };
-    }
 }

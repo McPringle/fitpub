@@ -369,7 +369,12 @@ public class FederationService {
             String actorUri = baseUrl + "/users/" + sender.getUsername();
 
             Map<String, Object> createActivity = new HashMap<>();
-            createActivity.put("@context", "https://www.w3.org/ns/activitystreams");
+            // Use the extended JSON-LD context that declares Mastodon's
+            // interaction-policy extension fields. This is needed so that
+            // any inner object carrying an `interactionPolicy` (e.g. Notes
+            // emitted by ActivityPostProcessingService that allow quotes)
+            // is correctly understood by Mastodon's parser.
+            createActivity.put("@context", net.javahippie.fitpub.util.ActivityPubContexts.extendedContext());
             createActivity.put("type", "Create");
             createActivity.put("id", createId);
             createActivity.put("actor", actorUri);
