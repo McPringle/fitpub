@@ -11,6 +11,7 @@ import net.javahippie.fitpub.model.dto.ActivityUploadRequest;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.model.entity.PrivacyZone;
 import net.javahippie.fitpub.model.entity.User;
+import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.service.ActivityFileService;
 import net.javahippie.fitpub.service.ActivityImageService;
@@ -50,6 +51,7 @@ public class ActivityController {
     private final ActivityFileService activityFileService;
     private final FitFileService fitFileService;
     private final UserRepository userRepository;
+    private final FollowRepository followRepository;
     private final ActivityPostProcessingService activityPostProcessingService;
     private final FederationService federationService;
     private final ActivityImageService activityImageService;
@@ -61,6 +63,40 @@ public class ActivityController {
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
+
+    /**
+     * Checks whether a viewer is allowed to see a non-public activity. Caller
+     * has already established that visibility != PUBLIC and that the viewer is
+     * authenticated.
+     *
+     * Rules:
+     *   - PRIVATE: only the owner.
+     *   - FOLLOWERS: the owner, or any local user with an ACCEPTED follow row
+     *     pointing at the owner's actor URI ({@code baseUrl + "/users/" + username}).
+     *
+     * The follow row uses the actor URI rather than a user-id FK because the
+     * same table also stores follows of remote actors.
+     */
+    private boolean canViewNonPublicActivity(Activity activity, UUID viewerId) {
+        if (viewerId == null) {
+            return false;
+        }
+        if (viewerId.equals(activity.getUserId())) {
+            return true;
+        }
+        if (activity.getVisibility() != Activity.Visibility.FOLLOWERS) {
+            return false;
+        }
+        User owner = userRepository.findById(activity.getUserId()).orElse(null);
+        if (owner == null) {
+            return false;
+        }
+        String ownerActorUri = baseUrl + "/users/" + owner.getUsername();
+        return followRepository
+            .findByFollowerIdAndFollowingActorUri(viewerId, ownerActorUri)
+            .filter(f -> f.getStatus() == net.javahippie.fitpub.model.entity.Follow.FollowStatus.ACCEPTED)
+            .isPresent();
+    }
 
     private void populatePeaks(net.javahippie.fitpub.model.dto.ActivityDTO dto, UUID activityId) {
         var activityPeaks = activityPeakRepository.findByActivityId(activityId);
@@ -202,14 +238,13 @@ public class ActivityController {
 
         UUID userId = getUserId(userDetails);
 
-        // Check if user has access (owner or follower)
-        Activity checkedActivity = fitFileService.getActivity(id, userId);
-        if (checkedActivity == null) {
+        // Check if user has access (owner, or follower for FOLLOWERS visibility)
+        if (!canViewNonPublicActivity(activity, userId)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         // Apply privacy filtering (owner sees full track, others see filtered)
-        ActivityDTO dto = ActivityDTO.fromEntityWithFiltering(checkedActivity, requestingUserId, privacyZones, trackPrivacyFilter);
+        ActivityDTO dto = ActivityDTO.fromEntityWithFiltering(activity, requestingUserId, privacyZones, trackPrivacyFilter);
         populatePeaks(dto, id);
         reactionEnricher.enrichSingle(dto, requestingUserId);
         return ResponseEntity.ok(dto);
@@ -437,9 +472,8 @@ public class ActivityController {
 
             UUID userId = getUserId(userDetails);
 
-            // Check if user owns the activity
-            if (!activity.getUserId().equals(userId)) {
-                // TODO: Check if user is following the activity owner (for FOLLOWERS visibility)
+            // Owner, or accepted follower for FOLLOWERS visibility
+            if (!canViewNonPublicActivity(activity, userId)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
         }
