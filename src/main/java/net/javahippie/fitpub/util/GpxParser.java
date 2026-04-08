@@ -92,6 +92,11 @@ public class GpxParser {
             // Apply speed smoothing
             smoothSpeedData(parsedData);
 
+            // GPX cadence (Garmin/TrainingPeaks <gpxtpx:cad>) is one-leg RPM by
+            // convention, just like FIT. Foot sports get doubled to "steps per
+            // minute" for both per-point values and the session metric averages.
+            normaliseCadenceForOnFootActivities(parsedData);
+
             // Detect indoor activities (GPX files use heuristic detection)
             detectIndoorActivity(parsedData);
 
@@ -689,5 +694,34 @@ public class GpxParser {
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
         return EARTH_RADIUS * c;
+    }
+
+    /**
+     * Doubles cadence values (per-track-point and session metric averages/maxes)
+     * for foot sports so the stored values represent <em>steps per minute</em>
+     * instead of the GPX/FIT convention's one-leg RPM. No-op for cycling and
+     * other non-foot sports. Mirrors the same helper in {@link FitParser}.
+     */
+    private void normaliseCadenceForOnFootActivities(ParsedActivityData parsedData) {
+        Activity.ActivityType type = parsedData.getActivityType();
+        if (type == null || !type.isOnFoot()) {
+            return;
+        }
+
+        for (TrackPointData point : parsedData.getTrackPoints()) {
+            if (point.getCadence() != null) {
+                point.setCadence(point.getCadence() * 2);
+            }
+        }
+
+        ActivityMetricsData metrics = parsedData.getMetrics();
+        if (metrics != null) {
+            if (metrics.getAverageCadence() != null) {
+                metrics.setAverageCadence(metrics.getAverageCadence() * 2);
+            }
+            if (metrics.getMaxCadence() != null) {
+                metrics.setMaxCadence(metrics.getMaxCadence() * 2);
+            }
+        }
     }
 }

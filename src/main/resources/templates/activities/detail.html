@@ -307,6 +307,20 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Cadence Chart -->
+                <div class="col-lg-4 col-md-12 mb-3 mb-lg-0" id="cadenceSection" style="display: none;">
+                    <div class="card h-100">
+                        <div class="card-header py-2">
+                            <h6 class="mb-0" id="cadenceChartTitle">
+                                <i class="bi bi-arrow-repeat"></i> Cadence
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="cadenceChart" height="120"></canvas>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Additional Metrics -->
@@ -330,7 +344,7 @@
                                 </div>
                                 <div class="col-md-4 mb-3" id="avgCadenceContainer" style="display: none;">
                                     <strong>Average Cadence:</strong>
-                                    <span id="avgCadence" class="float-end">-- rpm</span>
+                                    <span id="avgCadence" class="float-end">--</span>
                                 </div>
                                 <div class="col-md-4 mb-3" id="avgSpeedContainer" style="display: none;">
                                     <strong>Average Speed:</strong>
@@ -513,7 +527,7 @@
                     // Header
                     document.getElementById('activityTitle').innerHTML = linkifyHashtags(activity.title || 'Untitled Activity');
                     document.getElementById('activityType').textContent = activity.activityType;
-                    document.getElementById('activityType').className = `activity-type-badge activity-type-${activity.activityType.toLowerCase()}`;
+                    document.getElementById('activityType').className = `activity-type-badge activity-type-${(activity.activityType || '').toLowerCase().replace(/\s+/g, '-')}`;
                     // Format date with timezone awareness
                     document.getElementById('activityDate').textContent = FitPub.formatDateTimeWithTimezone(
                         activity.startedAt,
@@ -672,8 +686,19 @@
                             renderSpeedChart(activity.trackPoints);
                         }
 
+                        // Render cadence chart if data exists. Cadence is sport-dependent:
+                        // foot sports (run/walk/hike/mountaineering) display steps-per-minute,
+                        // cycling and other sports display revolutions-per-minute. The stored
+                        // values are already in the right unit per the parser fix; here we
+                        // just pick the right axis label.
+                        const hasCadence = activity.trackPoints.some(p => p.cadence != null && p.cadence > 0);
+                        if (hasCadence) {
+                            document.getElementById('cadenceSection').style.display = 'block';
+                            renderCadenceChart(activity.trackPoints, isOnFootActivityType(activity.activityType));
+                        }
+
                         // Show charts section if at least one chart is visible
-                        if (hasElevation || hasHeartRate || hasSpeed) {
+                        if (hasElevation || hasHeartRate || hasSpeed || hasCadence) {
                             document.getElementById('chartsSection').style.display = 'flex';
                         }
                     }
@@ -1247,6 +1272,129 @@
                 }
 
                 /**
+                 * Render cadence chart over time. Sport-aware: foot activities are labelled
+                 * "spm" (steps per minute), cycling and other sports are labelled "rpm".
+                 * The stored per-point values are already in the right unit thanks to the
+                 * parser normalisation in FitParser/GpxParser, so this function just picks
+                 * the axis label and chart title accordingly.
+                 *
+                 * @param {Array} trackPoints - Array of track point objects
+                 * @param {boolean} onFoot - True for foot sports (run/walk/hike/mountaineering)
+                 */
+                function renderCadenceChart(trackPoints, onFoot) {
+                    const unit = onFoot ? 'spm' : 'rpm';
+                    const axisLabel = onFoot ? 'Cadence (spm)' : 'Cadence (rpm)';
+
+                    // Reflect the unit in the card header so the chart title matches the axis.
+                    const titleEl = document.getElementById('cadenceChartTitle');
+                    if (titleEl) {
+                        titleEl.innerHTML = '<i class="bi bi-arrow-repeat"></i> Cadence (' + unit + ')';
+                    }
+
+                    // Walk the points once, building (elapsedMinutes, cadence) pairs and
+                    // remembering the source track point index so the map marker hover
+                    // integration works the same way as the heart rate chart.
+                    const cadenceData = [];
+                    let startTime = null;
+                    for (let i = 0; i < trackPoints.length; i++) {
+                        const point = trackPoints[i];
+                        if (point.cadence != null && point.cadence > 0) {
+                            const timestamp = new Date(point.timestamp);
+                            if (startTime === null) {
+                                startTime = timestamp;
+                            }
+                            const elapsedMinutes = (timestamp - startTime) / 1000 / 60;
+                            cadenceData.push({
+                                time: elapsedMinutes,
+                                cadence: point.cadence,
+                                trackPointIndex: i
+                            });
+                        }
+                    }
+
+                    if (cadenceData.length === 0) {
+                        return;
+                    }
+
+                    const totalMinutes = cadenceData[cadenceData.length - 1].time;
+
+                    const cadenceHoverHandler = throttle((event, activeElements) => {
+                        if (activeElements && activeElements.length > 0) {
+                            const dataIndex = activeElements[0].index;
+                            if (cadenceData[dataIndex]) {
+                                updateMapMarker(cadenceData[dataIndex].trackPointIndex);
+                            }
+                        } else {
+                            hideMapMarker();
+                        }
+                    }, 50);
+
+                    const ctx = document.getElementById('cadenceChart').getContext('2d');
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: cadenceData.map(d => formatElapsedTime(d.time, totalMinutes)),
+                            datasets: [{
+                                label: axisLabel,
+                                data: cadenceData.map(d => d.cadence),
+                                borderColor: 'rgb(13, 110, 253)',
+                                backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0,
+                                pointHoverRadius: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            onHover: cadenceHoverHandler,
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                tooltip: {
+                                    mode: 'index',
+                                    intersect: false,
+                                    callbacks: {
+                                        title: function(context) {
+                                            return 'Time: ' + context[0].label;
+                                        },
+                                        label: function(context) {
+                                            return context.parsed.y + ' ' + unit;
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: 'Time'
+                                    },
+                                    ticks: {
+                                        maxTicksLimit: 10
+                                    }
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: axisLabel
+                                    },
+                                    beginAtZero: false
+                                }
+                            },
+                            interaction: {
+                                mode: 'nearest',
+                                axis: 'x',
+                                intersect: false
+                            }
+                        }
+                    });
+                }
+
+                /**
                  * Render speed/pace chart over time
                  * @param {Array} trackPoints - Array of track point objects
                  */
@@ -1435,9 +1583,13 @@
                         hasAdditionalMetrics = true;
                     }
 
-                    // Average Cadence
+                    // Average Cadence — units are sport-dependent. Foot sports (run/walk/hike/
+                    // mountaineering) store steps-per-minute (both feet); cycling and the rest
+                    // store revolutions-per-minute. The parsers normalise on ingestion so the
+                    // stored value is already in the correct unit; we just pick the right label.
                     if (activity.averageCadence) {
-                        document.getElementById('avgCadence').textContent = Math.round(activity.averageCadence) + ' rpm';
+                        const cadenceUnit = isOnFootActivityType(activity.activityType) ? 'spm' : 'rpm';
+                        document.getElementById('avgCadence').textContent = Math.round(activity.averageCadence) + ' ' + cadenceUnit;
                         document.getElementById('avgCadenceContainer').style.display = 'block';
                         hasAdditionalMetrics = true;
                     }
@@ -1788,6 +1940,24 @@
                         console.error('Error deleting comment:', error);
                         FitPub.showAlert('Failed to delete comment. Please try again.', 'danger');
                     }
+                }
+
+                /**
+                 * Returns true if the given activity type string represents an on-foot
+                 * sport (run / walk / hike / mountaineering). The backend's ActivityDTO
+                 * runs the enum value through ActivityFormatter.formatActivityType, which
+                 * returns Title Case strings like "Run" or "Alpine Ski" rather than the
+                 * raw enum names. This helper normalises back to the canonical enum form
+                 * (UPPER_SNAKE_CASE) before comparing, so it stays correct if the
+                 * formatter changes its output style.
+                 */
+                function isOnFootActivityType(activityType) {
+                    if (!activityType) return false;
+                    const canonical = activityType.toString().toUpperCase().replace(/\s+/g, '_');
+                    return canonical === 'RUN'
+                        || canonical === 'WALK'
+                        || canonical === 'HIKE'
+                        || canonical === 'MOUNTAINEERING';
                 }
 
                 function escapeHtml(text) {

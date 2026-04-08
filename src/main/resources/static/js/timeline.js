@@ -213,7 +213,7 @@ const FitPubTimeline = {
                                 </div>
                             </div>
                             <div>
-                                <span class="activity-type-badge activity-type-${activity.activityType.toLowerCase()}${activity.race ? ' race-activity' : ''}">
+                                <span class="activity-type-badge activity-type-${(activity.activityType || '').toLowerCase().replace(/\s+/g, '-')}${activity.race ? ' race-activity' : ''}">
                                     ${activity.activityType}
                                 </span>
                                 ${activity.race
@@ -817,11 +817,23 @@ const FitPubTimeline = {
     },
 
     /**
-     * Render indoor activity placeholder with emoji
+     * Render indoor activity placeholder with emoji.
+     *
+     * <p>The activityType arrives in Title Case form ("Run", "Alpine Ski") because
+     * ActivityDTO runs the enum value through ActivityFormatter.formatActivityType
+     * before serialising. The maps below are keyed by the canonical enum names
+     * ("RUN", "ALPINE_SKI"), so we normalise the input before lookup. Without this
+     * normalisation every indoor activity falls through to the generic dumbbell
+     * fallback.
+     *
      * @param {HTMLElement} element - Container element
-     * @param {string} activityType - Activity type
+     * @param {string} activityType - Activity type, in any common form
      */
     renderIndoorPlaceholder: function(element, activityType) {
+        // Normalise to canonical UPPER_SNAKE_CASE: "Alpine Ski" → "ALPINE_SKI",
+        // "run" → "RUN". Tolerates whatever the backend hands us.
+        const canonical = (activityType || '').toString().toUpperCase().replace(/\s+/g, '_');
+
         const emojiMap = {
             'RUN': '🏃',
             'RIDE': '🚴',
@@ -864,8 +876,8 @@ const FitPubTimeline = {
             'OTHER': 'Indoor Activity'
         };
 
-        const emoji = emojiMap[activityType] || '🏋️';
-        const name = nameMap[activityType] || 'Indoor Activity';
+        const emoji = emojiMap[canonical] || '🏋️';
+        const name = nameMap[canonical] || 'Indoor Activity';
 
         element.innerHTML = `
             <div class="d-flex flex-column align-items-center justify-content-center h-100 indoor-activity-placeholder">

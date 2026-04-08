@@ -421,7 +421,7 @@
                                         </a>
                                     </h6>
                                     <p class="text-muted small mb-2">
-                                        <span class="activity-type-badge activity-type-${activity.activityType.toLowerCase()}">
+                                        <span class="activity-type-badge activity-type-${(activity.activityType || '').toLowerCase().replace(/\s+/g, '-')}">
                                             ${activity.activityType}
                                         </span>
                                         <span class="ms-2">

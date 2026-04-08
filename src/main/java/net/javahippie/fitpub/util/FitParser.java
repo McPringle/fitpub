@@ -122,6 +122,12 @@ public class FitParser {
                 smoothSpeedData(parsedData);
             }
 
+            // FIT cadence is one-leg RPM regardless of sport. For foot sports the
+            // universal display convention is "steps per minute" (both feet) — double
+            // the value at ingestion so the database always carries the
+            // sport-appropriate convention.
+            normaliseCadenceForOnFootActivities(parsedData);
+
             log.info("Successfully parsed FIT file: {} track points, activity type: {}, timezone: {}",
                 parsedData.getTrackPoints().size(), parsedData.getActivityType(), parsedData.getTimezone());
 
@@ -554,5 +560,37 @@ public class FitParser {
 
         log.debug("Calculated moving time from track points: moving={}, stopped={}", movingTime, stoppedTime);
         return movingTime;
+    }
+
+    /**
+     * Doubles cadence values (per-track-point and session metric averages/maxes)
+     * for foot sports so the stored values represent <em>steps per minute</em>
+     * instead of the FIT spec's native one-leg RPM. No-op for cycling and other
+     * non-foot sports. Must be called after the activity type has been set by
+     * {@link #extractSessionData}.
+     */
+    private void normaliseCadenceForOnFootActivities(ParsedActivityData parsedData) {
+        Activity.ActivityType type = parsedData.getActivityType();
+        if (type == null || !type.isOnFoot()) {
+            return;
+        }
+
+        // Per-point cadence
+        for (TrackPointData point : parsedData.getTrackPoints()) {
+            if (point.getCadence() != null) {
+                point.setCadence(point.getCadence() * 2);
+            }
+        }
+
+        // Session metric averages / maxes
+        ActivityMetricsData metrics = parsedData.getMetrics();
+        if (metrics != null) {
+            if (metrics.getAverageCadence() != null) {
+                metrics.setAverageCadence(metrics.getAverageCadence() * 2);
+            }
+            if (metrics.getMaxCadence() != null) {
+                metrics.setMaxCadence(metrics.getMaxCadence() * 2);
+            }
+        }
     }
 }

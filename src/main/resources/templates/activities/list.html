@@ -155,7 +155,7 @@
                                             ${renderTitleLinkWithHashtags(activity.title, `/activities/${activity.id}`)}
                                         </h5>
                                         <p class="text-muted mb-2">
-                                            <span class="activity-type-badge activity-type-${activity.activityType.toLowerCase()}${activity.race ? ' race-activity' : ''}">
+                                            <span class="activity-type-badge activity-type-${(activity.activityType || '').toLowerCase().replace(/\s+/g, '-')}${activity.race ? ' race-activity' : ''}">
                                                 ${activity.activityType}
                                             </span>
                                             ${activity.race

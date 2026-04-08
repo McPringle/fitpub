@@ -235,7 +235,27 @@ public class Activity {
         MOUNTAINEERING,
         YOGA,
         WORKOUT,
-        OTHER
+        OTHER;
+
+        /**
+         * Returns true for activity types where cadence should be expressed as
+         * <em>steps per minute</em> (both feet) rather than the FIT spec's native
+         * <em>revolutions per minute</em> (one foot only).
+         *
+         * <p>FIT files and Garmin/TrainingPeaks GPX extensions store cadence as
+         * one-leg RPM regardless of sport. For cycling that's correct (it's pedal
+         * RPM). For running / walking / hiking, every consumer (Strava, Garmin
+         * Connect, etc.) doubles the value to display "steps per minute" — the
+         * convention runners actually expect. The parsers consult this method to
+         * apply the ×2 at ingestion time, and the display layer consults it to
+         * choose the right unit label ("spm" vs "rpm").
+         */
+        public boolean isOnFoot() {
+            return switch (this) {
+                case RUN, WALK, HIKE, MOUNTAINEERING -> true;
+                default -> false;
+            };
+        }
     }
 
     /**
