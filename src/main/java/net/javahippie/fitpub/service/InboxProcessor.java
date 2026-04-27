@@ -287,10 +287,16 @@ public class InboxProcessor {
             User localUser = userRepository.findByUsername(username)
                     .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
 
-            String createActivityId = (String) createActivity.get("id");
-            log.info("Approving quote from {} for activity {} (Create id: {})", actor, activityId, createActivityId);
+            // Mastodon tracks pending quote approvals by the Note URI (the inner
+            // object's "id"), not by the wrapping Create activity's "id".  The Accept
+            // we send back must therefore reference the Note URI so Mastodon can match
+            // it to the pending approval.
+            @SuppressWarnings("unchecked")
+            Map<String, Object> noteObject = (Map<String, Object>) createActivity.get("object");
+            String noteUri = (String) noteObject.get("id");
+            log.info("Approving quote from {} for activity {} (Note URI: {})", actor, activityId, noteUri);
 
-            federationService.sendAcceptQuote(createActivityId, actor, localUser);
+            federationService.sendAcceptQuote(noteUri, actor, localUser);
 
         } catch (Exception e) {
             log.error("Error handling quote approval for {}", quoteUri, e);

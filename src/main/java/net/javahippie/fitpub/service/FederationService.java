@@ -256,12 +256,12 @@ public class FederationService {
      * Send an Accept for a quote interaction (FEP-5e53).
      * This tells the quoting server that the quote has been approved.
      *
-     * @param createActivityId the ID of the incoming Create activity that contains the quote
-     * @param remoteActorUri   the actor URI of the user who quoted the post
-     * @param localUser        the local user who owns the quoted post
+     * @param noteUri        the URI of the remote Note that quotes our post
+     * @param remoteActorUri the actor URI of the user who quoted the post
+     * @param localUser      the local user who owns the quoted post
      */
     @Async("taskExecutor")
-    public void sendAcceptQuote(String createActivityId, String remoteActorUri, User localUser) {
+    public void sendAcceptQuote(String noteUri, String remoteActorUri, User localUser) {
         try {
             RemoteActor remoteActor = fetchRemoteActor(remoteActorUri);
 
@@ -273,13 +273,13 @@ public class FederationService {
             acceptActivity.put("type", "Accept");
             acceptActivity.put("id", acceptId);
             acceptActivity.put("actor", actorUri);
-            acceptActivity.put("object", createActivityId);
+            acceptActivity.put("object", noteUri);
 
             sendActivity(remoteActor.getInboxUrl(), acceptActivity, localUser);
-            log.info("Sent Accept (quote approval) to: {} for Create {}", remoteActor.getActorUri(), createActivityId);
+            log.info("Sent Accept (quote approval) to: {} for Note {}", remoteActor.getActorUri(), noteUri);
 
         } catch (Exception e) {
-            log.error("Failed to send Accept for quote: {}", createActivityId, e);
+            log.error("Failed to send Accept for quote: {}", noteUri, e);
         }
     }
 
