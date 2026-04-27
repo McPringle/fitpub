@@ -238,6 +238,19 @@ public class InboxProcessor {
                 return;
             }
 
+            // Check if this Note quotes a local activity (FEP-5e53).
+            // Mastodon and other implementations use various field names for the quote reference.
+            String quoteUri = firstNonNull(
+                    (String) noteObject.get("quoteUri"),
+                    (String) noteObject.get("quote"),
+                    (String) noteObject.get("quoteUrl"),
+                    (String) noteObject.get("_misskey_quote")
+            );
+
+            if (quoteUri != null) {
+                handleQuoteApproval(username, activity, actor, quoteUri);
+            }
+
             String inReplyTo = (String) noteObject.get("inReplyTo");
 
             if (inReplyTo == null) {
@@ -250,6 +263,45 @@ public class InboxProcessor {
         } catch (Exception e) {
             log.error("Error processing Create activity", e);
         }
+    }
+
+    /**
+     * If the quoted URI points to a local activity, send an Accept back to
+     * the quoting actor so that Mastodon (and other FEP-5e53 implementations)
+     * marks the quote as approved.
+     */
+    private void handleQuoteApproval(String username, Map<String, Object> createActivity, String actor, String quoteUri) {
+        try {
+            UUID activityId = extractActivityIdFromUri(quoteUri);
+            if (activityId == null) {
+                log.debug("Quote URI {} does not reference a local activity, skipping approval", quoteUri);
+                return;
+            }
+
+            Activity localActivity = activityRepository.findById(activityId).orElse(null);
+            if (localActivity == null) {
+                log.warn("Quoted activity not found: {}", activityId);
+                return;
+            }
+
+            User localUser = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
+
+            String createActivityId = (String) createActivity.get("id");
+            log.info("Approving quote from {} for activity {} (Create id: {})", actor, activityId, createActivityId);
+
+            federationService.sendAcceptQuote(createActivityId, actor, localUser);
+
+        } catch (Exception e) {
+            log.error("Error handling quote approval for {}", quoteUri, e);
+        }
+    }
+
+    private static String firstNonNull(String... values) {
+        for (String v : values) {
+            if (v != null) return v;
+        }
+        return null;
     }
 
     /**
