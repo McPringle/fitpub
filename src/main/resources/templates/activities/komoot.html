@@ -18,7 +18,7 @@
             </h2>
 
             <div class="alert alert-secondary">
-                <div class="fw-semibold mb-1">Komoot Import</div>
+                <div class="fw-semibold mb-1">Important</div>
                 <div class="small mb-2">
                     Your Komoot credentials are only used for this request and are not stored in FitPub.
                 </div>
@@ -63,15 +63,6 @@
                         </div>
 
                         <div class="mt-4 d-flex justify-content-end gap-2 flex-wrap">
-                            <button type="button" class="btn btn-success" id="importFirstBtn">
-                                <span id="importFirstText">
-                                    <i class="bi bi-download"></i> Import First New Activity
-                                </span>
-                                <span id="importFirstSpinner" class="d-none">
-                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                    Importing...
-                                </span>
-                            </button>
                             <button type="submit" class="btn btn-primary" id="loadActivitiesBtn">
                                 <span id="loadActivitiesText">
                                     <i class="bi bi-arrow-repeat"></i> Load Komoot Activities
@@ -79,6 +70,15 @@
                                 <span id="loadActivitiesSpinner" class="d-none">
                                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                                     Loading...
+                                </span>
+                            </button>
+                            <button type="button" class="btn btn-success" id="importFirstBtn" disabled>
+                                <span id="importFirstText">
+                                    <i class="bi bi-download"></i> Import Listed Activities
+                                </span>
+                                <span id="importFirstSpinner" class="d-none">
+                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                    Importing...
                                 </span>
                             </button>
                         </div>
@@ -130,6 +130,11 @@
             const importFirstBtn = document.getElementById('importFirstBtn');
             const importFirstText = document.getElementById('importFirstText');
             const importFirstSpinner = document.getElementById('importFirstSpinner');
+            let currentActivities = [];
+
+            function updateImportButtonState() {
+                importFirstBtn.disabled = currentActivities.length === 0;
+            }
 
             function setLoading(loading) {
                 loadActivitiesBtn.disabled = loading;
@@ -216,6 +221,23 @@
                 return `<span class="activity-type-badge activity-type-${escapeHtml(normalizedType)}">${escapeHtml(activityType)}</span>`;
             }
 
+            function renderImportStatus(activity) {
+                if (activity.uiImportStatus === 'importing') {
+                    return '<span class="spinner-border spinner-border-sm text-primary" role="status" aria-label="Importing"></span>';
+                }
+
+                if (activity.uiImportStatus === 'error') {
+                    const title = escapeHtml(activity.uiImportError || 'Import failed');
+                    return `<i class="bi bi-exclamation-circle-fill text-danger" title="${title}" aria-label="${title}"></i>`;
+                }
+
+                if (activity.imported) {
+                    return '<i class="bi bi-check-circle-fill text-success" title="Already imported" aria-label="Already imported"></i>';
+                }
+
+                return '<i class="bi bi-plus-circle text-muted" title="New activity" aria-label="New activity"></i>';
+            }
+
             function renderActivities(activities) {
                 resultCount.textContent = activities.length;
 
@@ -233,11 +255,7 @@
                         <td>${formatDistance(activity.distanceMeters)}</td>
                         <td>${formatDuration(activity.timeInMotionSeconds || activity.durationSeconds)}</td>
                         <td>${formatElevation(activity.elevationUp)}</td>
-                        <td class="text-center">
-                            ${activity.imported
-                                ? '<i class="bi bi-check-circle-fill text-success" title="Already imported" aria-label="Already imported"></i>'
-                                : '<i class="bi bi-plus-circle text-muted" title="New activity" aria-label="New activity"></i>'}
-                        </td>
+                        <td class="text-center">${renderImportStatus(activity)}</td>
                     </tr>
                 `).join('');
 
@@ -254,6 +272,16 @@
                     userId: formData.get('userId'),
                     startDate: startDate || null,
                     endDate: endDate || null
+                };
+            }
+
+            function buildImportPayload(activityId) {
+                const payload = buildPayload();
+                return {
+                    email: payload.email,
+                    password: payload.password,
+                    userId: payload.userId,
+                    activityId: activityId
                 };
             }
 
@@ -274,6 +302,8 @@
                 }
 
                 setLoading(true);
+                currentActivities = [];
+                updateImportButtonState();
 
                 try {
                     const response = await FitPubAuth.authenticatedFetch('/api/komoot-import/activities', {
@@ -293,8 +323,13 @@
                     }
 
                     const data = await response.json();
-                    renderActivities(data.activities || []);
-                    form.querySelector('#password').value = '';
+                    currentActivities = (data.activities || []).map(activity => ({
+                        ...activity,
+                        uiImportStatus: null,
+                        uiImportError: null
+                    }));
+                    updateImportButtonState();
+                    renderActivities(currentActivities);
                 } catch (error) {
                     let message = error instanceof Error ? error.message : 'Failed to load Komoot activities.';
 
@@ -317,29 +352,66 @@
                     showError('Start date and end date must either both be set or both be empty.');
                     return;
                 }
+                if (currentActivities.length === 0) {
+                    showError('Load Komoot activities before starting the import.');
+                    return;
+                }
                 setImportLoading(true);
 
                 try {
-                    const response = await FitPubAuth.authenticatedFetch('/api/komoot-import/activities/import-first', {
-                        method: 'POST',
-                        body: payload
-                    });
+                    const activitiesToImport = currentActivities
+                        .filter(activity => !activity.imported)
+                        .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
 
-                    if (!response.ok) {
-                        let message = 'Failed to import Komoot activity.';
-                        try {
-                            const body = await response.json();
-                            message = body.error || message;
-                        } catch (ignored) {
-                            // Ignore parse errors and show the generic message.
-                        }
-                        throw new Error(message);
+                    if (activitiesToImport.length === 0) {
+                        showStatus('All listed Komoot activities are already imported.');
+                        return;
                     }
 
-                    const data = await response.json();
-                    showStatus(data.message || 'Komoot activity imported.');
+                    let importedCount = 0;
+                    let failedCount = 0;
+
+                    for (const activity of activitiesToImport) {
+                        activity.uiImportStatus = 'importing';
+                        activity.uiImportError = null;
+                        renderActivities(currentActivities);
+
+                        try {
+                            const response = await FitPubAuth.authenticatedFetch('/api/komoot-import/activities/import', {
+                                method: 'POST',
+                                body: buildImportPayload(activity.id)
+                            });
+
+                            if (!response.ok) {
+                                let message = 'Failed to import Komoot activity.';
+                                try {
+                                    const body = await response.json();
+                                    message = body.error || message;
+                                } catch (ignored) {
+                                    // Ignore parse errors and show the generic message.
+                                }
+                                throw new Error(message);
+                            }
+
+                            const data = await response.json();
+                            activity.imported = data.status === 'IMPORTED' || data.status === 'SKIPPED_ALREADY_IMPORTED';
+                            activity.uiImportStatus = activity.imported ? 'imported' : null;
+                            activity.uiImportError = null;
+                            if (data.status === 'IMPORTED') {
+                                importedCount += 1;
+                            }
+                        } catch (error) {
+                            failedCount += 1;
+                            activity.uiImportStatus = 'error';
+                            activity.uiImportError = error instanceof Error ? error.message : 'Failed to import Komoot activity.';
+                        }
+
+                        renderActivities(currentActivities);
+                    }
+
+                    showStatus(`Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
                 } catch (error) {
-                    let message = error instanceof Error ? error.message : 'Failed to import Komoot activity.';
+                    let message = error instanceof Error ? error.message : 'Failed to import Komoot activities.';
 
                     if (error instanceof Error && error.message === 'Authentication failed') {
                         return;
@@ -350,6 +422,8 @@
                     setImportLoading(false);
                 }
             });
+
+            updateImportButtonState();
         });
     </script>
 </th:block>

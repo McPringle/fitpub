@@ -3,6 +3,7 @@ package net.javahippie.fitpub.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javahippie.fitpub.model.dto.KomootActivityImportRequest;
 import net.javahippie.fitpub.model.dto.KomootActivitiesResponse;
 import net.javahippie.fitpub.model.dto.KomootActivitySummaryDTO;
 import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
@@ -32,7 +33,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -95,31 +95,28 @@ public class KomootImportService {
         return new KomootActivitiesResponse(request.userId(), activities.size(), activities);
     }
 
-    public KomootImportExecutionResponse importFirstNewActivity(KomootImportRequest request, UUID fitPubUserId) {
-        ImportCandidateContext context = buildImportCandidateContext(request, fitPubUserId);
-        if (context.candidate() == null) {
+    public KomootImportExecutionResponse importActivity(KomootActivityImportRequest request, UUID fitPubUserId) {
+        if (activityRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.activityId()).isPresent()) {
             return new KomootImportExecutionResponse(
                     null,
-                    null,
-                    context.importedKomootActivityIds().size(),
-                    context.activities().size(),
-                    "No new Komoot activities found to import."
+                    request.activityId(),
+                    "SKIPPED_ALREADY_IMPORTED",
+                    "Komoot activity " + request.activityId() + " was already imported."
             );
         }
 
-        KomootActivitySummaryDTO candidate = context.candidate();
-        JsonNode details = fetchActivityDetails(request, candidate.id());
-        byte[] gpxData = fetchActivityGpx(request, candidate.id());
+        JsonNode details = fetchActivityDetails(request.email(), request.password(), request.activityId());
+        byte[] gpxData = fetchActivityGpx(request.email(), request.password(), request.activityId());
 
         ByteArrayMultipartFile gpxFile = new ByteArrayMultipartFile(
                 "file",
-                "komoot-" + candidate.id() + ".gpx",
+                "komoot-" + request.activityId() + ".gpx",
                 "application/gpx+xml",
                 gpxData
         );
 
         Activity.Visibility mappedVisibility = mapVisibility(nullableText(details, "status"));
-        String mappedTitle = firstNonBlank(nullableText(details, "name"), candidate.name(), "Komoot Activity " + candidate.id());
+        String mappedTitle = firstNonBlank(nullableText(details, "name"), null, "Komoot Activity " + request.activityId());
         String mappedDescription = nullableText(details, "description");
         Activity.ActivityType mappedActivityType = mapKomootSportToActivityType(nullableText(details, "sport"));
 
@@ -131,7 +128,7 @@ public class KomootImportService {
                 mappedVisibility
         );
 
-        importedActivity.setKomootActivityId(candidate.id());
+        importedActivity.setKomootActivityId(request.activityId());
         importedActivity.setTitle(mappedTitle);
         importedActivity.setDescription(mappedDescription);
         importedActivity.setVisibility(mappedVisibility);
@@ -142,7 +139,7 @@ public class KomootImportService {
 
         log.info(
                 "Imported Komoot activity {} into FitPub activity {} with visibility {} and type {}",
-                candidate.id(),
+                request.activityId(),
                 importedActivity.getId(),
                 importedActivity.getVisibility(),
                 importedActivity.getActivityType()
@@ -150,10 +147,9 @@ public class KomootImportService {
 
         return new KomootImportExecutionResponse(
                 importedActivity.getId(),
-                candidate.id(),
-                context.importedKomootActivityIds().size() + 1,
-                context.activities().size(),
-                "Imported Komoot activity " + candidate.id() + " into FitPub activity " + importedActivity.getId()
+                request.activityId(),
+                "IMPORTED",
+                "Imported Komoot activity " + request.activityId() + " into FitPub activity " + importedActivity.getId()
         );
     }
 
@@ -250,12 +246,12 @@ public class KomootImportService {
         }
     }
 
-    private JsonNode fetchActivityDetails(KomootImportRequest request, long activityId) {
+    private JsonNode fetchActivityDetails(String email, String password, long activityId) {
         try {
             ResponseEntity<JsonNode> response = restTemplate.exchange(
                     buildDetailUri(activityId),
                     HttpMethod.GET,
-                    new HttpEntity<>(buildHeaders(request.email(), request.password())),
+                    new HttpEntity<>(buildHeaders(email, password)),
                     JsonNode.class
             );
 
@@ -273,8 +269,8 @@ public class KomootImportService {
         }
     }
 
-    private byte[] fetchActivityGpx(KomootImportRequest request, long activityId) {
-        HttpEntity<Void> httpEntity = new HttpEntity<>(buildGpxHeaders(request.email(), request.password()));
+    private byte[] fetchActivityGpx(String email, String password, long activityId) {
+        HttpEntity<Void> httpEntity = new HttpEntity<>(buildGpxHeaders(email, password));
         List<URI> candidateUris = buildGpxCandidateUris(activityId);
         Exception lastException = null;
 
@@ -311,24 +307,6 @@ public class KomootImportService {
         }
 
         throw new IllegalStateException("Failed to download GPX from Komoot for activity " + activityId, lastException);
-    }
-
-    private ImportCandidateContext buildImportCandidateContext(KomootImportRequest request, UUID fitPubUserId) {
-        Set<Long> importedKomootActivityIds = new HashSet<>(
-                activityRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
-
-        List<KomootActivitySummaryDTO> activities = new ArrayList<>(fetchCompletedActivities(request, fitPubUserId).activities());
-        activities.sort(Comparator.comparing(
-                KomootActivitySummaryDTO::date,
-                Comparator.nullsLast(Comparator.reverseOrder())
-        ));
-
-        KomootActivitySummaryDTO candidate = activities.stream()
-                .filter(activity -> !importedKomootActivityIds.contains(activity.id()))
-                .findFirst()
-                .orElse(null);
-
-        return new ImportCandidateContext(importedKomootActivityIds, activities, candidate);
     }
 
     private String formatKomootStartDate(LocalDate localDate) {
@@ -394,13 +372,6 @@ public class KomootImportService {
             return second;
         }
         return fallback;
-    }
-
-    private record ImportCandidateContext(
-            Set<Long> importedKomootActivityIds,
-            List<KomootActivitySummaryDTO> activities,
-            KomootActivitySummaryDTO candidate
-    ) {
     }
 
     private URI extractNextUri(JsonNode root) {

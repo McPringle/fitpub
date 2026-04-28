@@ -31,6 +31,11 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
     List<Long> findImportedKomootActivityIdsByUserId(@Param("userId") UUID userId);
 
     /**
+     * Finds a previously imported Komoot activity for the given user.
+     */
+    Optional<Activity> findByUserIdAndKomootActivityId(UUID userId, Long komootActivityId);
+
+    /**
      * Find all activities for a specific user.
      *
      * @param userId the user ID

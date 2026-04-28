@@ -3,6 +3,7 @@ package net.javahippie.fitpub.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javahippie.fitpub.model.dto.KomootActivityImportRequest;
 import net.javahippie.fitpub.model.dto.KomootActivitiesResponse;
 import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
 import net.javahippie.fitpub.model.dto.KomootImportRequest;
@@ -47,19 +48,19 @@ public class KomootImportController {
         return ResponseEntity.ok(response);
     }
 
-    @PostMapping("/activities/import-first")
-    public ResponseEntity<KomootImportExecutionResponse> importFirstNewActivity(
-            @Valid @RequestBody KomootImportRequest request,
+    @PostMapping("/activities/import")
+    public ResponseEntity<KomootImportExecutionResponse> importActivity(
+            @Valid @RequestBody KomootActivityImportRequest request,
             Authentication authentication
     ) {
         UUID fitPubUserId = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new IllegalArgumentException("Authenticated user not found"))
                 .getId();
 
-        log.info("User {} requested Komoot import for the first new activity",
-                authentication.getName());
+        log.info("User {} requested Komoot import for activity {}",
+                authentication.getName(), request.activityId());
 
-        KomootImportExecutionResponse response = komootImportService.importFirstNewActivity(
+        KomootImportExecutionResponse response = komootImportService.importActivity(
                 request,
                 fitPubUserId
         );
