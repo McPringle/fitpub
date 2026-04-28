@@ -61,6 +61,15 @@ public class KomootImportService {
     @Value("${fitpub.komoot.base-url:https://www.komoot.com}")
     private String komootBaseUrl;
 
+    @Value("${fitpub.komoot.paginated-request-delay-ms:1000}")
+    private long paginatedRequestDelayMillis;
+
+    @Value("${fitpub.komoot.detail-to-gpx-delay-ms:500}")
+    private long detailToGpxDelayMillis;
+
+    @Value("${fitpub.komoot.activity-import-delay-ms:3000}")
+    private long activityImportDelayMillis;
+
     public KomootActivitiesResponse fetchCompletedActivities(KomootImportRequest request, UUID fitPubUserId) {
         List<KomootActivitySummaryDTO> activities = new ArrayList<>();
         Set<Long> importedKomootActivityIds = new HashSet<>(
@@ -80,6 +89,9 @@ public class KomootImportService {
                 }
                 extractActivities(root, activities, importedKomootActivityIds);
                 nextUri = extractNextUri(root);
+                if (nextUri != null) {
+                    pauseBeforeNextPageRequest();
+                }
             }
         } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
             throw new IllegalArgumentException("Komoot login failed. Check email, password and Komoot ID.", e);
@@ -95,6 +107,10 @@ public class KomootImportService {
         return new KomootActivitiesResponse(request.userId(), activities.size(), activities);
     }
 
+    void pauseBeforeNextPageRequest() {
+        pause(paginatedRequestDelayMillis, "Interrupted while throttling paginated Komoot requests.");
+    }
+
     public KomootImportExecutionResponse importActivity(KomootActivityImportRequest request, UUID fitPubUserId) {
         if (activityRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.activityId()).isPresent()) {
             return new KomootImportExecutionResponse(
@@ -106,6 +122,7 @@ public class KomootImportService {
         }
 
         JsonNode details = fetchActivityDetails(request.email(), request.password(), request.activityId());
+        pauseBetweenDetailAndGpxRequest();
         byte[] gpxData = fetchActivityGpx(request.email(), request.password(), request.activityId());
 
         ByteArrayMultipartFile gpxFile = new ByteArrayMultipartFile(
@@ -145,12 +162,22 @@ public class KomootImportService {
                 importedActivity.getActivityType()
         );
 
+        pauseAfterActivityImport();
+
         return new KomootImportExecutionResponse(
                 importedActivity.getId(),
                 request.activityId(),
                 "IMPORTED",
                 "Imported Komoot activity " + request.activityId() + " into FitPub activity " + importedActivity.getId()
         );
+    }
+
+    void pauseBetweenDetailAndGpxRequest() {
+        pause(detailToGpxDelayMillis, "Interrupted while throttling Komoot detail and GPX requests.");
+    }
+
+    void pauseAfterActivityImport() {
+        pause(activityImportDelayMillis, "Interrupted while throttling Komoot activity imports.");
     }
 
     private URI buildInitialUri(KomootImportRequest request) {
@@ -409,5 +436,18 @@ public class KomootImportService {
     private Integer nullableInteger(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asInt();
+    }
+
+    private void pause(long delayMillis, String interruptedMessage) {
+        if (delayMillis <= 0) {
+            return;
+        }
+
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interruptedMessage, e);
+        }
     }
 }

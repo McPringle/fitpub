@@ -28,7 +28,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.ExpectedCount.once;
@@ -58,6 +60,9 @@ class KomootImportServiceTest {
         activityPostProcessingService = mock(ActivityPostProcessingService.class);
         service = new KomootImportService(restTemplate, activityRepository, activityFileService, activityPostProcessingService);
         ReflectionTestUtils.setField(service, "komootBaseUrl", "https://www.komoot.com");
+        ReflectionTestUtils.setField(service, "paginatedRequestDelayMillis", 0L);
+        ReflectionTestUtils.setField(service, "detailToGpxDelayMillis", 0L);
+        ReflectionTestUtils.setField(service, "activityImportDelayMillis", 0L);
     }
 
     @AfterEach
@@ -70,6 +75,8 @@ class KomootImportServiceTest {
         String authHeader = "Basic " + Base64.getEncoder()
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        KomootImportService throttledService = spy(service);
+        doNothing().when(throttledService).pauseBeforeNextPageRequest();
 
         when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1002L));
 
@@ -127,7 +134,7 @@ class KomootImportServiceTest {
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        KomootActivitiesResponse response = service.fetchCompletedActivities(
+        KomootActivitiesResponse response = throttledService.fetchCompletedActivities(
                 new KomootImportRequest("user@example.com", "secret", "123456", null, null),
                 userId);
 
@@ -139,6 +146,7 @@ class KomootImportServiceTest {
         assertThat(response.activities().get(1).name()).isEqualTo("Lunch Walk");
         assertThat(response.activities().get(1).imported()).isTrue();
 
+        verify(throttledService).pauseBeforeNextPageRequest();
         server.verify();
     }
 
@@ -218,6 +226,9 @@ class KomootImportServiceTest {
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         UUID importedActivityId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        KomootImportService throttledService = spy(service);
+        doNothing().when(throttledService).pauseBetweenDetailAndGpxRequest();
+        doNothing().when(throttledService).pauseAfterActivityImport();
 
         when(activityRepository.findByUserIdAndKomootActivityId(userId, 2880957035L)).thenReturn(Optional.empty());
 
@@ -257,7 +268,7 @@ class KomootImportServiceTest {
         when(activityFileService.processActivityFile(any(), any(), any(), any(), any())).thenReturn(importedActivity);
         when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        KomootImportExecutionResponse response = service.importActivity(
+        KomootImportExecutionResponse response = throttledService.importActivity(
                 new KomootActivityImportRequest("user@example.com", "secret", "123456", 2880957035L),
                 userId
         );
@@ -271,6 +282,8 @@ class KomootImportServiceTest {
         assertThat(importedActivity.getVisibility()).isEqualTo(Activity.Visibility.PUBLIC);
         assertThat(importedActivity.getActivityType()).isEqualTo(Activity.ActivityType.RIDE);
 
+        verify(throttledService).pauseBetweenDetailAndGpxRequest();
+        verify(throttledService).pauseAfterActivityImport();
         verify(activityPostProcessingService).processActivityAsync(importedActivityId, userId);
         server.verify();
     }
@@ -302,6 +315,9 @@ class KomootImportServiceTest {
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         UUID importedActivityId = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        KomootImportService throttledService = spy(service);
+        doNothing().when(throttledService).pauseBetweenDetailAndGpxRequest();
+        doNothing().when(throttledService).pauseAfterActivityImport();
 
         when(activityRepository.findByUserIdAndKomootActivityId(userId, 2880957036L)).thenReturn(Optional.empty());
 
@@ -341,7 +357,7 @@ class KomootImportServiceTest {
         when(activityFileService.processActivityFile(any(), any(), any(), any(), any())).thenReturn(importedActivity);
         when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        KomootImportExecutionResponse response = service.importActivity(
+        KomootImportExecutionResponse response = throttledService.importActivity(
                 new KomootActivityImportRequest("user@example.com", "secret", "123456", 2880957036L),
                 userId
         );
@@ -350,6 +366,8 @@ class KomootImportServiceTest {
         assertThat(response.status()).isEqualTo("IMPORTED");
         assertThat(importedActivity.getActivityType()).isEqualTo(Activity.ActivityType.OTHER);
 
+        verify(throttledService).pauseBetweenDetailAndGpxRequest();
+        verify(throttledService).pauseAfterActivityImport();
         verify(activityPostProcessingService).processActivityAsync(importedActivityId, userId);
         server.verify();
     }

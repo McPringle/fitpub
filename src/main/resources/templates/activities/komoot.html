@@ -19,14 +19,19 @@
 
             <div class="alert alert-secondary">
                 <div class="fw-semibold mb-1">Important</div>
-                <div class="small mb-2">
+                <div class="small mb-1">
                     Your Komoot credentials are only used for this request and are not stored in FitPub.
                 </div>
                 <div class="small mb-0">
-                    Komoot does not provide a public API for this flow. This import currently depends on the
-                    same web API endpoints used by the Komoot website and may stop working if Komoot changes them.
+                    The import currently runs in this browser tab. If you leave or reload the page, remaining activities will not continue importing automatically.
                 </div>
             </div>
+
+            <ul class="small text-muted ps-3 mb-4">
+                <li>Import starts with the oldest new activities, so progress begins at the bottom of the list.</li>
+                <li>FitPub adds short delays between Komoot requests during loading and import to reduce rate limiting.</li>
+                <li>This integration depends on Komoot web endpoints and may stop working if Komoot changes them.</li>
+            </ul>
 
             <div id="errorAlert" class="alert alert-danger d-none" role="alert"></div>
 
@@ -81,6 +86,9 @@
                                     Importing...
                                 </span>
                             </button>
+                            <button type="button" class="btn btn-outline-danger d-none" id="cancelImportBtn">
+                                <i class="bi bi-stop-circle"></i> Stop After Current Activity
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -130,10 +138,13 @@
             const importFirstBtn = document.getElementById('importFirstBtn');
             const importFirstText = document.getElementById('importFirstText');
             const importFirstSpinner = document.getElementById('importFirstSpinner');
+            const cancelImportBtn = document.getElementById('cancelImportBtn');
             let currentActivities = [];
+            let importCancellationRequested = false;
+            let importInProgress = false;
 
             function updateImportButtonState() {
-                importFirstBtn.disabled = currentActivities.length === 0;
+                importFirstBtn.disabled = importInProgress || currentActivities.length === 0;
             }
 
             function setLoading(loading) {
@@ -143,9 +154,13 @@
             }
 
             function setImportLoading(loading) {
-                importFirstBtn.disabled = loading;
+                importInProgress = loading;
+                loadActivitiesBtn.disabled = loading;
+                updateImportButtonState();
                 importFirstText.classList.toggle('d-none', loading);
                 importFirstSpinner.classList.toggle('d-none', !loading);
+                cancelImportBtn.classList.toggle('d-none', !loading);
+                cancelImportBtn.disabled = !loading;
             }
 
             function showError(message) {
@@ -222,6 +237,10 @@
             }
 
             function renderImportStatus(activity) {
+                if (activity.uiImportStatus === 'queued') {
+                    return '<i class="bi bi-hourglass-split text-warning" title="Queued for import" aria-label="Queued for import"></i>';
+                }
+
                 if (activity.uiImportStatus === 'importing') {
                     return '<span class="spinner-border spinner-border-sm text-primary" role="status" aria-label="Importing"></span>';
                 }
@@ -287,6 +306,15 @@
 
             function hasIncompleteDateRange(payload) {
                 return Boolean(payload.startDate) !== Boolean(payload.endDate);
+            }
+
+            function resetQueuedActivities() {
+                for (const activity of currentActivities) {
+                    if (activity.uiImportStatus === 'queued') {
+                        activity.uiImportStatus = null;
+                        activity.uiImportError = null;
+                    }
+                }
             }
 
             form.addEventListener('submit', async function(event) {
@@ -356,6 +384,7 @@
                     showError('Load Komoot activities before starting the import.');
                     return;
                 }
+                importCancellationRequested = false;
                 setImportLoading(true);
 
                 try {
@@ -368,8 +397,15 @@
                         return;
                     }
 
+                    for (const activity of activitiesToImport) {
+                        activity.uiImportStatus = 'queued';
+                        activity.uiImportError = null;
+                    }
+                    renderActivities(currentActivities);
+
                     let importedCount = 0;
                     let failedCount = 0;
+                    let cancelled = false;
 
                     for (const activity of activitiesToImport) {
                         activity.uiImportStatus = 'importing';
@@ -407,9 +443,20 @@
                         }
 
                         renderActivities(currentActivities);
+
+                        if (importCancellationRequested) {
+                            cancelled = true;
+                            resetQueuedActivities();
+                            renderActivities(currentActivities);
+                            break;
+                        }
                     }
 
-                    showStatus(`Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
+                    if (cancelled) {
+                        showStatus(`Import stopped after the current activity. Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
+                    } else {
+                        showStatus(`Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
+                    }
                 } catch (error) {
                     let message = error instanceof Error ? error.message : 'Failed to import Komoot activities.';
 
@@ -420,7 +467,14 @@
                     showError(message);
                 } finally {
                     setImportLoading(false);
+                    importCancellationRequested = false;
                 }
+            });
+
+            cancelImportBtn.addEventListener('click', function() {
+                importCancellationRequested = true;
+                cancelImportBtn.disabled = true;
+                showStatus('Import will stop after the current activity finishes.');
             });
 
             updateImportButtonState();
