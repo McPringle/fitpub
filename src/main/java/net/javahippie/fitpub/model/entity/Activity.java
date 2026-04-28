@@ -118,6 +118,13 @@ public class Activity {
     private String sourceFileFormat;
 
     /**
+     * Optional internal reference to the originating Komoot activity.
+     * Used for import matching and deduplication only.
+     */
+    @Column(name = "komoot_activity_id")
+    private Long komootActivityId;
+
+    /**
      * Indicates if this is an indoor activity (e.g., virtual rides, indoor trainer sessions).
      * Indoor activities are displayed in timeline but excluded from heatmap generation.
      */

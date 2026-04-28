@@ -18,12 +18,12 @@
             </h2>
 
             <div class="alert alert-secondary">
-                <div class="fw-semibold mb-1">Phase 1: Preview only</div>
+                <div class="fw-semibold mb-1">Komoot Import</div>
                 <div class="small mb-2">
                     Your Komoot credentials are only used for this request and are not stored in FitPub.
                 </div>
                 <div class="small mb-0">
-                    Komoot does not provide a public API for this flow. This preview currently depends on the
+                    Komoot does not provide a public API for this flow. This import currently depends on the
                     same web API endpoints used by the Komoot website and may stop working if Komoot changes them.
                 </div>
             </div>
@@ -49,7 +49,16 @@
                             </div>
                         </div>
 
-                        <div class="mt-4 d-flex justify-content-end">
+                        <div class="mt-4 d-flex justify-content-end gap-2 flex-wrap">
+                            <button type="button" class="btn btn-success" id="importFirstBtn">
+                                <span id="importFirstText">
+                                    <i class="bi bi-download"></i> Import First New Activity
+                                </span>
+                                <span id="importFirstSpinner" class="d-none">
+                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                    Importing...
+                                </span>
+                            </button>
                             <button type="submit" class="btn btn-primary" id="loadActivitiesBtn">
                                 <span id="loadActivitiesText">
                                     <i class="bi bi-arrow-repeat"></i> Load Completed Activities
@@ -104,11 +113,20 @@
             const loadActivitiesBtn = document.getElementById('loadActivitiesBtn');
             const loadActivitiesText = document.getElementById('loadActivitiesText');
             const loadActivitiesSpinner = document.getElementById('loadActivitiesSpinner');
+            const importFirstBtn = document.getElementById('importFirstBtn');
+            const importFirstText = document.getElementById('importFirstText');
+            const importFirstSpinner = document.getElementById('importFirstSpinner');
 
             function setLoading(loading) {
                 loadActivitiesBtn.disabled = loading;
                 loadActivitiesText.classList.toggle('d-none', loading);
                 loadActivitiesSpinner.classList.toggle('d-none', !loading);
+            }
+
+            function setImportLoading(loading) {
+                importFirstBtn.disabled = loading;
+                importFirstText.classList.toggle('d-none', loading);
+                importFirstSpinner.classList.toggle('d-none', !loading);
             }
 
             function showError(message) {
@@ -119,6 +137,18 @@
             function clearError() {
                 errorAlert.textContent = '';
                 errorAlert.classList.add('d-none');
+            }
+
+            function showStatus(message) {
+                errorAlert.textContent = message;
+                errorAlert.classList.remove('d-none');
+                errorAlert.classList.remove('alert-danger');
+                errorAlert.classList.add('alert-info');
+            }
+
+            function resetAlertToError() {
+                errorAlert.classList.remove('alert-info');
+                errorAlert.classList.add('alert-danger');
             }
 
             function formatDistance(meters) {
@@ -193,17 +223,22 @@
                 resultsSection.classList.remove('d-none');
             }
 
-            form.addEventListener('submit', async function(event) {
-                event.preventDefault();
-                clearError();
-                resultsSection.classList.add('d-none');
-
+            function buildPayload() {
                 const formData = new FormData(form);
-                const payload = {
+                return {
                     email: formData.get('email'),
                     password: formData.get('password'),
                     userId: formData.get('userId')
                 };
+            }
+
+            form.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                clearError();
+                resetAlertToError();
+                resultsSection.classList.add('d-none');
+
+                const payload = buildPayload();
 
                 setLoading(true);
 
@@ -237,6 +272,45 @@
                     showError(message);
                 } finally {
                     setLoading(false);
+                }
+            });
+
+            importFirstBtn.addEventListener('click', async function() {
+                clearError();
+                resetAlertToError();
+
+                const payload = buildPayload();
+                setImportLoading(true);
+
+                try {
+                    const response = await FitPubAuth.authenticatedFetch('/api/komoot-import/activities/import-first', {
+                        method: 'POST',
+                        body: payload
+                    });
+
+                    if (!response.ok) {
+                        let message = 'Failed to import Komoot activity.';
+                        try {
+                            const body = await response.json();
+                            message = body.error || message;
+                        } catch (ignored) {
+                            // Ignore parse errors and show the generic message.
+                        }
+                        throw new Error(message);
+                    }
+
+                    const data = await response.json();
+                    showStatus(data.message || 'Komoot activity imported.');
+                } catch (error) {
+                    let message = error instanceof Error ? error.message : 'Failed to import Komoot activity.';
+
+                    if (error instanceof Error && error.message === 'Authentication failed') {
+                        return;
+                    }
+
+                    showError(message);
+                } finally {
+                    setImportLoading(false);
                 }
             });
         });

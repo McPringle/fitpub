@@ -24,6 +24,13 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
     List<UUID> findAllIds();
 
     /**
+     * Returns all imported Komoot activity IDs for the given local user.
+     */
+    @Query("SELECT a.komootActivityId FROM Activity a " +
+           "WHERE a.userId = :userId AND a.komootActivityId IS NOT NULL")
+    List<Long> findImportedKomootActivityIdsByUserId(@Param("userId") UUID userId);
+
+    /**
      * Find all activities for a specific user.
      *
      * @param userId the user ID

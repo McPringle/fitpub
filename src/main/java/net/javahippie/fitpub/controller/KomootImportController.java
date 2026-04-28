@@ -4,7 +4,9 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.dto.KomootActivitiesResponse;
+import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
 import net.javahippie.fitpub.model.dto.KomootImportRequest;
+import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.service.KomootImportService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,8 +18,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 /**
- * REST API for previewing completed Komoot activities.
+ * REST API for loading and importing Komoot activities.
  */
 @RestController
 @RequestMapping("/api/komoot-import")
@@ -26,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class KomootImportController {
 
     private final KomootImportService komootImportService;
+    private final UserRepository userRepository;
 
     @PostMapping("/activities")
     public ResponseEntity<KomootActivitiesResponse> listActivities(
@@ -35,6 +40,25 @@ public class KomootImportController {
         log.info("User {} requested Komoot activity preview for Komoot ID {}",
                 authentication.getName(), request.userId());
         KomootActivitiesResponse response = komootImportService.fetchCompletedActivities(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/activities/import-first")
+    public ResponseEntity<KomootImportExecutionResponse> importFirstNewActivity(
+            @Valid @RequestBody KomootImportRequest request,
+            Authentication authentication
+    ) {
+        UUID fitPubUserId = userRepository.findByUsername(authentication.getName())
+                .orElseThrow(() -> new IllegalArgumentException("Authenticated user not found"))
+                .getId();
+
+        log.info("User {} requested Komoot import for the first new activity",
+                authentication.getName());
+
+        KomootImportExecutionResponse response = komootImportService.importFirstNewActivity(
+                request,
+                fitPubUserId
+        );
         return ResponseEntity.ok(response);
     }
 
