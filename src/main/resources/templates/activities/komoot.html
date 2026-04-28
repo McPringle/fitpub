@@ -69,13 +69,7 @@
 
                         <div class="mt-4 d-flex justify-content-end gap-2 flex-wrap">
                             <button type="submit" class="btn btn-primary" id="loadActivitiesBtn">
-                                <span id="loadActivitiesText">
-                                    <i class="bi bi-arrow-repeat"></i> Load Komoot Activities
-                                </span>
-                                <span id="loadActivitiesSpinner" class="d-none">
-                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                    Loading...
-                                </span>
+                                <i class="bi bi-arrow-repeat"></i> Load Komoot Activities
                             </button>
                             <button type="button" class="btn btn-success" id="importFirstBtn" disabled>
                                 <span id="importFirstText">
@@ -92,6 +86,13 @@
                         </div>
                     </form>
                 </div>
+            </div>
+
+            <div id="loadingIndicator" class="text-center py-5 d-none">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted mb-0">Loading Komoot activities...</p>
             </div>
 
             <div id="resultsSection" class="mt-4 d-none">
@@ -129,12 +130,11 @@
         document.addEventListener('DOMContentLoaded', function() {
             const form = document.getElementById('komootImportForm');
             const errorAlert = document.getElementById('errorAlert');
+            const loadingIndicator = document.getElementById('loadingIndicator');
             const resultsSection = document.getElementById('resultsSection');
             const resultsBody = document.getElementById('resultsBody');
             const resultCount = document.getElementById('resultCount');
             const loadActivitiesBtn = document.getElementById('loadActivitiesBtn');
-            const loadActivitiesText = document.getElementById('loadActivitiesText');
-            const loadActivitiesSpinner = document.getElementById('loadActivitiesSpinner');
             const importFirstBtn = document.getElementById('importFirstBtn');
             const importFirstText = document.getElementById('importFirstText');
             const importFirstSpinner = document.getElementById('importFirstSpinner');
@@ -149,8 +149,7 @@
 
             function setLoading(loading) {
                 loadActivitiesBtn.disabled = loading;
-                loadActivitiesText.classList.toggle('d-none', loading);
-                loadActivitiesSpinner.classList.toggle('d-none', !loading);
+                loadingIndicator.classList.toggle('d-none', !loading);
             }
 
             function setImportLoading(loading) {
