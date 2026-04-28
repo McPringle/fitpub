@@ -320,14 +320,17 @@ public class KomootImportService {
 
         for (URI candidateUri : candidateUris) {
             try {
-                ResponseEntity<byte[]> response = restTemplate.exchange(
+                byte[] body = restTemplate.execute(
                         candidateUri,
                         HttpMethod.GET,
-                        httpEntity,
-                        byte[].class
+                        request -> request.getHeaders().putAll(httpEntity.getHeaders()),
+                        response -> {
+                            if (response.getBody() == null) {
+                                return null;
+                            }
+                            return response.getBody().readAllBytes();
+                        }
                 );
-
-                byte[] body = response.getBody();
                 if (body == null || body.length == 0) {
                     throw new IllegalStateException("Komoot returned an empty GPX response.");
                 }

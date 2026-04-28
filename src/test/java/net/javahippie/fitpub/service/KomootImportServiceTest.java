@@ -270,6 +270,7 @@ class KomootImportServiceTest {
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/2880957035.gpx"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andExpect(header(HttpHeaders.ACCEPT, "application/gpx+xml, application/xml, text/xml"))
                 .andRespond(withSuccess("""
                         <?xml version="1.0" encoding="UTF-8"?>
                         <gpx version="1.1" creator="komoot">
@@ -359,6 +360,7 @@ class KomootImportServiceTest {
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/2880957036.gpx"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andExpect(header(HttpHeaders.ACCEPT, "application/gpx+xml, application/xml, text/xml"))
                 .andRespond(withSuccess("""
                         <?xml version="1.0" encoding="UTF-8"?>
                         <gpx version="1.1" creator="komoot">
