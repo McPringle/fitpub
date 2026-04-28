@@ -4,6 +4,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
+import java.time.LocalDate;
+
 /**
  * Request payload for fetching completed activities from Komoot.
  *
@@ -19,6 +21,19 @@ public record KomootImportRequest(
 
         @NotBlank
         @Pattern(regexp = "\\d+", message = "Komoot user ID must contain digits only")
-        String userId
+        String userId,
+
+        LocalDate startDate,
+
+        LocalDate endDate
 ) {
+    public KomootImportRequest {
+        boolean onlyOneDateProvided = (startDate == null) != (endDate == null);
+        if (onlyOneDateProvided) {
+            throw new IllegalArgumentException("Start date and end date must either both be set or both be empty.");
+        }
+        if (startDate != null && startDate.isAfter(endDate)) {
+            throw new IllegalArgumentException("Start date must be before or equal to end date.");
+        }
+    }
 }

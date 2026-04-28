@@ -24,7 +24,12 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -47,6 +52,7 @@ public class KomootImportService {
 
     private static final int PAGE_SIZE = 100;
     private static final String KOMOOT_LANGUAGE = "en";
+    private static final DateTimeFormatter KOMOOT_DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSX");
     private final RestTemplate restTemplate;
     private final ActivityRepository activityRepository;
     private final ActivityFileService activityFileService;
@@ -58,7 +64,7 @@ public class KomootImportService {
     public KomootActivitiesResponse fetchCompletedActivities(KomootImportRequest request) {
         List<KomootActivitySummaryDTO> activities = new ArrayList<>();
 
-        URI nextUri = buildInitialUri(request.userId());
+        URI nextUri = buildInitialUri(request);
         HttpEntity<Void> httpEntity = new HttpEntity<>(buildHeaders(request.email(), request.password()));
 
         try {
@@ -149,19 +155,25 @@ public class KomootImportService {
         );
     }
 
-    private URI buildInitialUri(String userId) {
+    private URI buildInitialUri(KomootImportRequest request) {
         String normalizedBaseUrl = komootBaseUrl.endsWith("/") ? komootBaseUrl.substring(0, komootBaseUrl.length() - 1) : komootBaseUrl;
-        return UriComponentsBuilder.fromUriString(normalizedBaseUrl + "/api/v007/users/" + userId + "/tours/")
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(normalizedBaseUrl + "/api/v007/users/" + request.userId() + "/tours/")
                 .queryParam("type", "tour_recorded")
-                .queryParam("status", "private")
-                .queryParam("name", "")
-                .queryParam("hl", KOMOOT_LANGUAGE)
                 .queryParam("sort_field", "date")
                 .queryParam("sort_direction", "desc")
-                .queryParam("page", 0)
-                .queryParam("limit", PAGE_SIZE)
-                .build()
-                .toUri();
+                .queryParam("limit", PAGE_SIZE);
+
+        if (request.startDate() != null && request.endDate() != null) {
+            builder.queryParam("start_date", formatKomootStartDate(request.startDate()))
+                    .queryParam("end_date", formatKomootEndDate(request.endDate()));
+        } else {
+            builder.queryParam("status", "private")
+                    .queryParam("name", "")
+                    .queryParam("hl", KOMOOT_LANGUAGE)
+                    .queryParam("page", 0);
+        }
+
+        return builder.build().toUri();
     }
 
     private URI buildDetailUri(long activityId) {
@@ -312,6 +324,21 @@ public class KomootImportService {
                 .orElse(null);
 
         return new ImportCandidateContext(importedKomootActivityIds, activities, candidate);
+    }
+
+    private String formatKomootStartDate(LocalDate localDate) {
+        return localDate.atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .atOffset(ZoneOffset.UTC)
+                .format(KOMOOT_DATE_TIME_FORMATTER);
+    }
+
+    private String formatKomootEndDate(LocalDate localDate) {
+        return localDate.atTime(LocalTime.of(23, 59, 59, 999_000_000))
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .atOffset(ZoneOffset.UTC)
+                .format(KOMOOT_DATE_TIME_FORMATTER);
     }
 
     private Activity.Visibility mapVisibility(String komootStatus) {

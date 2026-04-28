@@ -47,6 +47,19 @@
                                 <input type="text" class="form-control" id="userId" name="userId" required inputmode="numeric" pattern="[0-9]+">
                                 <div class="form-text">You can find the Komoot ID in your Komoot account settings.</div>
                             </div>
+                            <div class="col-md-6">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="startDate" class="form-label">Start Date</label>
+                                        <input type="date" class="form-control" id="startDate" name="startDate">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="endDate" class="form-label">End Date</label>
+                                        <input type="date" class="form-control" id="endDate" name="endDate">
+                                    </div>
+                                </div>
+                                <div class="form-text">Both dates must be set together. Inclusive, day-based filter.</div>
+                            </div>
                         </div>
 
                         <div class="mt-4 d-flex justify-content-end gap-2 flex-wrap">
@@ -225,11 +238,19 @@
 
             function buildPayload() {
                 const formData = new FormData(form);
+                const startDate = formData.get('startDate');
+                const endDate = formData.get('endDate');
                 return {
                     email: formData.get('email'),
                     password: formData.get('password'),
-                    userId: formData.get('userId')
+                    userId: formData.get('userId'),
+                    startDate: startDate || null,
+                    endDate: endDate || null
                 };
+            }
+
+            function hasIncompleteDateRange(payload) {
+                return Boolean(payload.startDate) !== Boolean(payload.endDate);
             }
 
             form.addEventListener('submit', async function(event) {
@@ -239,6 +260,10 @@
                 resultsSection.classList.add('d-none');
 
                 const payload = buildPayload();
+                if (hasIncompleteDateRange(payload)) {
+                    showError('Start date and end date must either both be set or both be empty.');
+                    return;
+                }
 
                 setLoading(true);
 
@@ -280,6 +305,10 @@
                 resetAlertToError();
 
                 const payload = buildPayload();
+                if (hasIncompleteDateRange(payload)) {
+                    showError('Start date and end date must either both be set or both be empty.');
+                    return;
+                }
                 setImportLoading(true);
 
                 try {

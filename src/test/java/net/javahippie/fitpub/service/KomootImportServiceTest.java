@@ -6,6 +6,7 @@ import net.javahippie.fitpub.model.dto.KomootImportRequest;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.repository.ActivityRepository;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -16,11 +17,14 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.Base64;
 import java.util.List;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -39,9 +43,12 @@ class KomootImportServiceTest {
     private ActivityRepository activityRepository;
     private ActivityFileService activityFileService;
     private ActivityPostProcessingService activityPostProcessingService;
+    private TimeZone originalTimeZone;
 
     @BeforeEach
     void setUp() {
+        originalTimeZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("Europe/Zurich"));
         restTemplate = new RestTemplate();
         server = MockRestServiceServer.bindTo(restTemplate).build();
         activityRepository = mock(ActivityRepository.class);
@@ -51,12 +58,17 @@ class KomootImportServiceTest {
         ReflectionTestUtils.setField(service, "komootBaseUrl", "https://www.komoot.com");
     }
 
+    @AfterEach
+    void tearDown() {
+        TimeZone.setDefault(originalTimeZone);
+    }
+
     @Test
     void shouldFetchAndMergePagedCompletedActivities() {
         String authHeader = "Basic " + Base64.getEncoder()
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
 
-        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&status=private&name=&hl=en&sort_field=date&sort_direction=desc&page=0&limit=100"))
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&status=private&name=&hl=en&page=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
                 .andRespond(withSuccess("""
@@ -111,7 +123,7 @@ class KomootImportServiceTest {
                         """, MediaType.APPLICATION_JSON));
 
         KomootActivitiesResponse response = service.fetchCompletedActivities(
-                new KomootImportRequest("user@example.com", "secret", "123456"));
+                new KomootImportRequest("user@example.com", "secret", "123456", null, null));
 
         assertThat(response.totalCount()).isEqualTo(2);
         assertThat(response.activities()).hasSize(2);
@@ -120,6 +132,69 @@ class KomootImportServiceTest {
         assertThat(response.activities().get(1).name()).isEqualTo("Lunch Walk");
 
         server.verify();
+    }
+
+    @Test
+    @DisplayName("Should filter loaded Komoot activities by inclusive date range")
+    void shouldFilterCompletedActivitiesByInclusiveDateRange() {
+        String authHeader = "Basic " + Base64.getEncoder()
+                .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
+
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&start_date=2026-04-25T22:00:00.000Z&end_date=2026-04-27T21:59:59.999Z"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andRespond(withSuccess("""
+                        {
+                          "_embedded": {
+                            "tours": [
+                              {
+                                "id": 1002,
+                                "name": "Included Start",
+                                "sport": "hike",
+                                "status": "private",
+                                "type": "tour_recorded",
+                                "date": "2026-04-26T00:00:00+02:00"
+                              },
+                              {
+                                "id": 1003,
+                                "name": "Included End",
+                                "sport": "run",
+                                "status": "private",
+                                "type": "tour_recorded",
+                                "date": "2026-04-27T23:59:59+02:00"
+                              }
+                            ]
+                          },
+                          "_links": {}
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        KomootActivitiesResponse response = service.fetchCompletedActivities(
+                new KomootImportRequest(
+                        "user@example.com",
+                        "secret",
+                        "123456",
+                        LocalDate.of(2026, 4, 26),
+                        LocalDate.of(2026, 4, 27)
+                ));
+
+        assertThat(response.totalCount()).isEqualTo(2);
+        assertThat(response.activities()).extracting("id").containsExactly(1002L, 1003L);
+
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("Should reject incomplete Komoot date range")
+    void shouldRejectIncompleteDateRange() {
+        assertThatThrownBy(() -> new KomootImportRequest(
+                "user@example.com",
+                "secret",
+                "123456",
+                LocalDate.of(2026, 4, 27),
+                null
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Start date and end date must either both be set or both be empty.");
     }
 
     @Test
@@ -132,7 +207,7 @@ class KomootImportServiceTest {
 
         when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of());
 
-        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&status=private&name=&hl=en&sort_field=date&sort_direction=desc&page=0&limit=100"))
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&status=private&name=&hl=en&page=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
                 .andRespond(withSuccess("""
@@ -190,7 +265,7 @@ class KomootImportServiceTest {
         when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         KomootImportExecutionResponse response = service.importFirstNewActivity(
-                new KomootImportRequest("user@example.com", "secret", "123456"),
+                new KomootImportRequest("user@example.com", "secret", "123456", null, null),
                 userId
         );
 
@@ -207,6 +282,91 @@ class KomootImportServiceTest {
     }
 
     @Test
+    @DisplayName("Should respect date range when choosing Komoot import candidate")
+    void shouldRespectDateRangeWhenImportingFirstNewActivity() {
+        String authHeader = "Basic " + Base64.getEncoder()
+                .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
+        UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        UUID importedActivityId = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+        when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of());
+
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&start_date=2026-04-26T22:00:00.000Z&end_date=2026-04-27T21:59:59.999Z"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andRespond(withSuccess("""
+                        {
+                          "_embedded": {
+                            "tours": [
+                              {
+                                "id": 3002,
+                                "name": "Inside Range Candidate",
+                                "sport": "mtb_easy",
+                                "status": "public",
+                                "type": "tour_recorded",
+                                "date": "2026-04-27T18:15:00+02:00"
+                              }
+                            ]
+                          },
+                          "_links": {}
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/3002?hl=en"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andRespond(withSuccess("""
+                        {
+                          "id": "3002",
+                          "name": "Inside Range Candidate",
+                          "description": "Imported from Komoot",
+                          "status": "public",
+                          "sport": "mtb_easy"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/3002.gpx"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andRespond(withSuccess("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <gpx version="1.1" creator="komoot">
+                          <trk><name>Inside Range Candidate</name></trk>
+                        </gpx>
+                        """, MediaType.APPLICATION_XML));
+
+        Activity importedActivity = Activity.builder()
+                .id(importedActivityId)
+                .userId(userId)
+                .activityType(Activity.ActivityType.OTHER)
+                .title("GPX Title")
+                .description(null)
+                .visibility(Activity.Visibility.PRIVATE)
+                .sourceFileFormat("GPX")
+                .build();
+
+        when(activityFileService.processActivityFile(any(), any(), any(), any(), any())).thenReturn(importedActivity);
+        when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        KomootImportExecutionResponse response = service.importFirstNewActivity(
+                new KomootImportRequest(
+                        "user@example.com",
+                        "secret",
+                        "123456",
+                        LocalDate.of(2026, 4, 27),
+                        LocalDate.of(2026, 4, 27)
+                ),
+                userId
+        );
+
+        assertThat(response.importedKomootActivityId()).isEqualTo(3002L);
+        assertThat(importedActivity.getKomootActivityId()).isEqualTo(3002L);
+
+        verify(activityPostProcessingService).processActivityAsync(importedActivityId, userId);
+        server.verify();
+    }
+
+    @Test
     @DisplayName("Should fall back to OTHER when Komoot sport cannot be mapped")
     void shouldFallbackToOtherForUnknownKomootSport() {
         String authHeader = "Basic " + Base64.getEncoder()
@@ -216,7 +376,7 @@ class KomootImportServiceTest {
 
         when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of());
 
-        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&status=private&name=&hl=en&sort_field=date&sort_direction=desc&page=0&limit=100"))
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&status=private&name=&hl=en&page=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
                 .andRespond(withSuccess("""
@@ -274,7 +434,7 @@ class KomootImportServiceTest {
         when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         KomootImportExecutionResponse response = service.importFirstNewActivity(
-                new KomootImportRequest("user@example.com", "secret", "123456"),
+                new KomootImportRequest("user@example.com", "secret", "123456", null, null),
                 userId
         );
 
