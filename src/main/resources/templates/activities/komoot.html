@@ -236,6 +236,14 @@
                 return `<span class="activity-type-badge activity-type-${escapeHtml(normalizedType)}">${escapeHtml(activityType)}</span>`;
             }
 
+            function renderActivityTitle(activity) {
+                const title = escapeHtml(activity.name || 'Untitled activity');
+                if (activity.fitPubActivityId) {
+                    return `<a href="/activities/${encodeURIComponent(activity.fitPubActivityId)}" class="fw-semibold text-decoration-none">${title}</a>`;
+                }
+                return `<div class="fw-semibold">${title}</div>`;
+            }
+
             function renderImportStatus(activity) {
                 if (activity.uiImportStatus === 'queued') {
                     return '<i class="bi bi-hourglass-split text-warning" title="Queued for import" aria-label="Queued for import"></i>';
@@ -268,7 +276,7 @@
 
                 resultsBody.innerHTML = activities.map(activity => `
                     <tr>
-                        <td><div class="fw-semibold">${escapeHtml(activity.name || 'Untitled activity')}</div></td>
+                        <td>${renderActivityTitle(activity)}</td>
                         <td>${formatDate(activity.date)}</td>
                         <td>${formatActivityTypeBadge(activity.mappedActivityType)}</td>
                         <td>${formatDistance(activity.distanceMeters)}</td>
@@ -431,6 +439,7 @@
 
                             const data = await response.json();
                             activity.imported = data.status === 'IMPORTED' || data.status === 'SKIPPED_ALREADY_IMPORTED';
+                            activity.fitPubActivityId = data.importedActivityId || activity.fitPubActivityId;
                             activity.uiImportStatus = activity.imported ? 'imported' : null;
                             activity.uiImportError = null;
                             if (data.status === 'IMPORTED') {

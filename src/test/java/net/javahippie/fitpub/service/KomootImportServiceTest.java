@@ -41,6 +41,20 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class KomootImportServiceTest {
 
+    private static ActivityRepository.KomootImportLinkProjection importLink(UUID activityId, Long komootActivityId) {
+        return new ActivityRepository.KomootImportLinkProjection() {
+            @Override
+            public UUID getId() {
+                return activityId;
+            }
+
+            @Override
+            public Long getKomootActivityId() {
+                return komootActivityId;
+            }
+        };
+    }
+
     private RestTemplate restTemplate;
     private MockRestServiceServer server;
     private KomootImportService service;
@@ -77,8 +91,11 @@ class KomootImportServiceTest {
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         KomootImportService throttledService = spy(service);
         doNothing().when(throttledService).pauseBeforeNextPageRequest();
+        UUID existingActivityId = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
 
         when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1002L));
+        when(activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(userId, List.of(1002L)))
+                .thenReturn(List.of(importLink(existingActivityId, 1002L)));
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&status=private&name=&hl=en&page=0"))
                 .andExpect(method(HttpMethod.GET))
@@ -142,9 +159,11 @@ class KomootImportServiceTest {
         assertThat(response.activities()).hasSize(2);
         assertThat(response.activities().get(0).id()).isEqualTo(1001L);
         assertThat(response.activities().get(0).imported()).isFalse();
+        assertThat(response.activities().get(0).fitPubActivityId()).isNull();
         assertThat(response.activities().get(0).timeInMotionSeconds()).isEqualTo(7800);
         assertThat(response.activities().get(1).name()).isEqualTo("Lunch Walk");
         assertThat(response.activities().get(1).imported()).isTrue();
+        assertThat(response.activities().get(1).fitPubActivityId()).isEqualTo(existingActivityId);
 
         verify(throttledService).pauseBeforeNextPageRequest();
         server.verify();
@@ -156,8 +175,11 @@ class KomootImportServiceTest {
         String authHeader = "Basic " + Base64.getEncoder()
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        UUID existingActivityId = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
         when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1003L));
+        when(activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(userId, List.of(1003L)))
+                .thenReturn(List.of(importLink(existingActivityId, 1003L)));
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&start_date=2026-04-25T22:00:00.000Z&end_date=2026-04-27T21:59:59.999Z"))
                 .andExpect(method(HttpMethod.GET))
@@ -202,6 +224,7 @@ class KomootImportServiceTest {
         assertThat(response.activities()).extracting("id").containsExactly(1002L, 1003L);
         assertThat(response.activities().get(0).imported()).isFalse();
         assertThat(response.activities().get(1).imported()).isTrue();
+        assertThat(response.activities().get(1).fitPubActivityId()).isEqualTo(existingActivityId);
 
         server.verify();
     }
@@ -303,7 +326,7 @@ class KomootImportServiceTest {
                 userId
         );
 
-        assertThat(response.importedActivityId()).isNull();
+        assertThat(response.importedActivityId()).isEqualTo(existingActivityId);
         assertThat(response.importedKomootActivityId()).isEqualTo(3002L);
         assertThat(response.status()).isEqualTo("SKIPPED_ALREADY_IMPORTED");
     }

@@ -1,6 +1,7 @@
 package net.javahippie.fitpub.model.dto;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 /**
  * Reduced activity representation returned by the Komoot import preview.
@@ -17,6 +18,7 @@ public record KomootActivitySummaryDTO(
         Integer durationSeconds,
         Integer timeInMotionSeconds,
         Double elevationUp,
-        boolean imported
+        boolean imported,
+        UUID fitPubActivityId
 ) {
 }

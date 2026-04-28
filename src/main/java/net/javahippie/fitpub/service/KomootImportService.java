@@ -33,8 +33,10 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -74,6 +76,14 @@ public class KomootImportService {
         List<KomootActivitySummaryDTO> activities = new ArrayList<>();
         Set<Long> importedKomootActivityIds = new HashSet<>(
                 activityRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
+        Map<Long, UUID> fitPubActivityIdsByKomootId = new HashMap<>();
+        if (!importedKomootActivityIds.isEmpty()) {
+            activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(
+                            fitPubUserId,
+                            new ArrayList<>(importedKomootActivityIds)
+                    )
+                    .forEach(link -> fitPubActivityIdsByKomootId.put(link.getKomootActivityId(), link.getId()));
+        }
 
         URI nextUri = buildInitialUri(request);
         HttpEntity<Void> httpEntity = new HttpEntity<>(buildHeaders(request.email(), request.password()));
@@ -87,7 +97,7 @@ public class KomootImportService {
                 if (root == null) {
                     throw new IllegalStateException("Komoot returned an empty response body.");
                 }
-                extractActivities(root, activities, importedKomootActivityIds);
+                extractActivities(root, activities, importedKomootActivityIds, fitPubActivityIdsByKomootId);
                 nextUri = extractNextUri(root);
                 if (nextUri != null) {
                     pauseBeforeNextPageRequest();
@@ -112,9 +122,10 @@ public class KomootImportService {
     }
 
     public KomootImportExecutionResponse importActivity(KomootActivityImportRequest request, UUID fitPubUserId) {
-        if (activityRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.activityId()).isPresent()) {
+        Activity existingActivity = activityRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.activityId()).orElse(null);
+        if (existingActivity != null) {
             return new KomootImportExecutionResponse(
-                    null,
+                    existingActivity.getId(),
                     request.activityId(),
                     "SKIPPED_ALREADY_IMPORTED",
                     "Komoot activity " + request.activityId() + " was already imported."
@@ -248,7 +259,12 @@ public class KomootImportService {
         return "Basic " + encoded;
     }
 
-    private void extractActivities(JsonNode root, List<KomootActivitySummaryDTO> activities, Set<Long> importedKomootActivityIds) {
+    private void extractActivities(
+            JsonNode root,
+            List<KomootActivitySummaryDTO> activities,
+            Set<Long> importedKomootActivityIds,
+            Map<Long, UUID> fitPubActivityIdsByKomootId
+    ) {
         JsonNode tours = root.path("_embedded").path("tours");
         if (!tours.isArray()) {
             return;
@@ -268,7 +284,8 @@ public class KomootImportService {
                     nullableInteger(tour, "duration"),
                     nullableInteger(tour, "time_in_motion"),
                     nullableDouble(tour, "elevation_up"),
-                    importedKomootActivityIds.contains(activityId)
+                    importedKomootActivityIds.contains(activityId),
+                    fitPubActivityIdsByKomootId.get(activityId)
             ));
         }
     }
