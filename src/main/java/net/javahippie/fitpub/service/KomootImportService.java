@@ -61,8 +61,10 @@ public class KomootImportService {
     @Value("${fitpub.komoot.base-url:https://www.komoot.com}")
     private String komootBaseUrl;
 
-    public KomootActivitiesResponse fetchCompletedActivities(KomootImportRequest request) {
+    public KomootActivitiesResponse fetchCompletedActivities(KomootImportRequest request, UUID fitPubUserId) {
         List<KomootActivitySummaryDTO> activities = new ArrayList<>();
+        Set<Long> importedKomootActivityIds = new HashSet<>(
+                activityRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
 
         URI nextUri = buildInitialUri(request);
         HttpEntity<Void> httpEntity = new HttpEntity<>(buildHeaders(request.email(), request.password()));
@@ -76,7 +78,7 @@ public class KomootImportService {
                 if (root == null) {
                     throw new IllegalStateException("Komoot returned an empty response body.");
                 }
-                extractActivities(root, activities);
+                extractActivities(root, activities, importedKomootActivityIds);
                 nextUri = extractNextUri(root);
             }
         } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
@@ -223,24 +225,27 @@ public class KomootImportService {
         return "Basic " + encoded;
     }
 
-    private void extractActivities(JsonNode root, List<KomootActivitySummaryDTO> activities) {
+    private void extractActivities(JsonNode root, List<KomootActivitySummaryDTO> activities, Set<Long> importedKomootActivityIds) {
         JsonNode tours = root.path("_embedded").path("tours");
         if (!tours.isArray()) {
             return;
         }
 
         for (JsonNode tour : tours) {
+            long activityId = tour.path("id").asLong();
             activities.add(new KomootActivitySummaryDTO(
-                    tour.path("id").asLong(),
+                    activityId,
                     nullableText(tour, "name"),
                     nullableText(tour, "sport"),
+                    mapKomootSportToActivityType(nullableText(tour, "sport")).name(),
                     nullableText(tour, "status"),
                     nullableText(tour, "type"),
                     parseDate(tour.path("date").asText(null)),
                     nullableDouble(tour, "distance"),
                     nullableInteger(tour, "duration"),
                     nullableInteger(tour, "time_in_motion"),
-                    nullableDouble(tour, "elevation_up")
+                    nullableDouble(tour, "elevation_up"),
+                    importedKomootActivityIds.contains(activityId)
             ));
         }
     }
@@ -312,7 +317,7 @@ public class KomootImportService {
         Set<Long> importedKomootActivityIds = new HashSet<>(
                 activityRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
 
-        List<KomootActivitySummaryDTO> activities = new ArrayList<>(fetchCompletedActivities(request).activities());
+        List<KomootActivitySummaryDTO> activities = new ArrayList<>(fetchCompletedActivities(request, fitPubUserId).activities());
         activities.sort(Comparator.comparing(
                 KomootActivitySummaryDTO::date,
                 Comparator.nullsLast(Comparator.reverseOrder())

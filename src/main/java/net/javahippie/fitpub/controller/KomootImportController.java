@@ -37,9 +37,13 @@ public class KomootImportController {
             @Valid @RequestBody KomootImportRequest request,
             Authentication authentication
     ) {
+        UUID fitPubUserId = userRepository.findByUsername(authentication.getName())
+                .orElseThrow(() -> new IllegalArgumentException("Authenticated user not found"))
+                .getId();
+
         log.info("User {} requested Komoot activity preview for Komoot ID {}",
                 authentication.getName(), request.userId());
-        KomootActivitiesResponse response = komootImportService.fetchCompletedActivities(request);
+        KomootActivitiesResponse response = komootImportService.fetchCompletedActivities(request, fitPubUserId);
         return ResponseEntity.ok(response);
     }
 

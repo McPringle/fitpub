@@ -9,12 +9,14 @@ public record KomootActivitySummaryDTO(
         long id,
         String name,
         String sport,
+        String mappedActivityType,
         String status,
         String type,
         OffsetDateTime date,
         Double distanceMeters,
         Integer durationSeconds,
         Integer timeInMotionSeconds,
-        Double elevationUp
+        Double elevationUp,
+        boolean imported
 ) {
 }

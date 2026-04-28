@@ -67,6 +67,9 @@ class KomootImportServiceTest {
     void shouldFetchAndMergePagedCompletedActivities() {
         String authHeader = "Basic " + Base64.getEncoder()
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
+        UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+        when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1002L));
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&status=private&name=&hl=en&page=0"))
                 .andExpect(method(HttpMethod.GET))
@@ -123,13 +126,16 @@ class KomootImportServiceTest {
                         """, MediaType.APPLICATION_JSON));
 
         KomootActivitiesResponse response = service.fetchCompletedActivities(
-                new KomootImportRequest("user@example.com", "secret", "123456", null, null));
+                new KomootImportRequest("user@example.com", "secret", "123456", null, null),
+                userId);
 
         assertThat(response.totalCount()).isEqualTo(2);
         assertThat(response.activities()).hasSize(2);
         assertThat(response.activities().get(0).id()).isEqualTo(1001L);
+        assertThat(response.activities().get(0).imported()).isFalse();
         assertThat(response.activities().get(0).timeInMotionSeconds()).isEqualTo(7800);
         assertThat(response.activities().get(1).name()).isEqualTo("Lunch Walk");
+        assertThat(response.activities().get(1).imported()).isTrue();
 
         server.verify();
     }
@@ -139,6 +145,9 @@ class KomootImportServiceTest {
     void shouldFilterCompletedActivitiesByInclusiveDateRange() {
         String authHeader = "Basic " + Base64.getEncoder()
                 .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
+        UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+        when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1003L));
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&start_date=2026-04-25T22:00:00.000Z&end_date=2026-04-27T21:59:59.999Z"))
                 .andExpect(method(HttpMethod.GET))
@@ -176,10 +185,13 @@ class KomootImportServiceTest {
                         "123456",
                         LocalDate.of(2026, 4, 26),
                         LocalDate.of(2026, 4, 27)
-                ));
+                ),
+                userId);
 
         assertThat(response.totalCount()).isEqualTo(2);
         assertThat(response.activities()).extracting("id").containsExactly(1002L, 1003L);
+        assertThat(response.activities().get(0).imported()).isFalse();
+        assertThat(response.activities().get(1).imported()).isTrue();
 
         server.verify();
     }
