@@ -8,7 +8,6 @@ import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.ActivitySummaryRepository;
 import net.javahippie.fitpub.repository.AchievementRepository;
 import net.javahippie.fitpub.repository.PersonalRecordRepository;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -68,7 +67,17 @@ public class ActivitySummaryService {
         LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
         LocalDate weekEnd = weekStart.plusDays(6);
 
-        saveSummaryWithRetry(userId, ActivitySummary.PeriodType.WEEK, weekStart, weekEnd);
+        ActivitySummary summary = activitySummaryRepository
+                .findByUserIdAndPeriodTypeAndPeriodStart(userId, ActivitySummary.PeriodType.WEEK, weekStart)
+                .orElse(ActivitySummary.builder()
+                        .userId(userId)
+                        .periodType(ActivitySummary.PeriodType.WEEK)
+                        .periodStart(weekStart)
+                        .periodEnd(weekEnd)
+                        .build());
+
+        calculateAndUpdateSummary(summary, userId, weekStart.atStartOfDay(), weekEnd.plusDays(1).atStartOfDay());
+        activitySummaryRepository.save(summary);
     }
 
     /**
@@ -79,7 +88,17 @@ public class ActivitySummaryService {
         LocalDate monthStart = date.with(TemporalAdjusters.firstDayOfMonth());
         LocalDate monthEnd = date.with(TemporalAdjusters.lastDayOfMonth());
 
-        saveSummaryWithRetry(userId, ActivitySummary.PeriodType.MONTH, monthStart, monthEnd);
+        ActivitySummary summary = activitySummaryRepository
+                .findByUserIdAndPeriodTypeAndPeriodStart(userId, ActivitySummary.PeriodType.MONTH, monthStart)
+                .orElse(ActivitySummary.builder()
+                        .userId(userId)
+                        .periodType(ActivitySummary.PeriodType.MONTH)
+                        .periodStart(monthStart)
+                        .periodEnd(monthEnd)
+                        .build());
+
+        calculateAndUpdateSummary(summary, userId, monthStart.atStartOfDay(), monthEnd.plusDays(1).atStartOfDay());
+        activitySummaryRepository.save(summary);
     }
 
     /**
@@ -90,46 +109,17 @@ public class ActivitySummaryService {
         LocalDate yearStart = date.with(TemporalAdjusters.firstDayOfYear());
         LocalDate yearEnd = date.with(TemporalAdjusters.lastDayOfYear());
 
-        saveSummaryWithRetry(userId, ActivitySummary.PeriodType.YEAR, yearStart, yearEnd);
-    }
-
-    private void saveSummaryWithRetry(
-            UUID userId,
-            ActivitySummary.PeriodType periodType,
-            LocalDate periodStart,
-            LocalDate periodEnd
-    ) {
         ActivitySummary summary = activitySummaryRepository
-                .findByUserIdAndPeriodTypeAndPeriodStart(userId, periodType, periodStart)
+                .findByUserIdAndPeriodTypeAndPeriodStart(userId, ActivitySummary.PeriodType.YEAR, yearStart)
                 .orElse(ActivitySummary.builder()
                         .userId(userId)
-                        .periodType(periodType)
-                        .periodStart(periodStart)
-                        .periodEnd(periodEnd)
+                        .periodType(ActivitySummary.PeriodType.YEAR)
+                        .periodStart(yearStart)
+                        .periodEnd(yearEnd)
                         .build());
 
-        LocalDateTime startDateTime = periodStart.atStartOfDay();
-        LocalDateTime endDateTime = periodEnd.plusDays(1).atStartOfDay();
-
-        calculateAndUpdateSummary(summary, userId, startDateTime, endDateTime);
-
-        try {
-            activitySummaryRepository.save(summary);
-        } catch (DataIntegrityViolationException e) {
-            log.debug(
-                    "Summary already created concurrently for user {}, period {} starting {}. Retrying as update.",
-                    userId,
-                    periodType,
-                    periodStart
-            );
-
-            ActivitySummary existingSummary = activitySummaryRepository
-                    .findByUserIdAndPeriodTypeAndPeriodStart(userId, periodType, periodStart)
-                    .orElseThrow(() -> e);
-
-            calculateAndUpdateSummary(existingSummary, userId, startDateTime, endDateTime);
-            activitySummaryRepository.save(existingSummary);
-        }
+        calculateAndUpdateSummary(summary, userId, yearStart.atStartOfDay(), yearEnd.plusDays(1).atStartOfDay());
+        activitySummaryRepository.save(summary);
     }
 
     /**
