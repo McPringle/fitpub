@@ -104,6 +104,9 @@ fitpub:
     enabled: ${WEATHER_ENABLED:false}
     api-key: ${OPENWEATHERMAP_API_KEY:}
 
+  komoot:
+    base-url: ${KOMOOT_BASE_URL:https://www.komoot.com}
+
 # Logging configuration
 logging:
   level:
