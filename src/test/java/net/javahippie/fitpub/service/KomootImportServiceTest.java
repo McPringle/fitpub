@@ -55,7 +55,6 @@ class KomootImportServiceTest {
         };
     }
 
-    private RestTemplate restTemplate;
     private MockRestServiceServer server;
     private KomootImportService service;
     private ActivityRepository activityRepository;
@@ -67,7 +66,7 @@ class KomootImportServiceTest {
     void setUp() {
         originalTimeZone = TimeZone.getDefault();
         TimeZone.setDefault(TimeZone.getTimeZone("Europe/Zurich"));
-        restTemplate = new RestTemplate();
+        RestTemplate restTemplate = new RestTemplate();
         server = MockRestServiceServer.bindTo(restTemplate).build();
         activityRepository = mock(ActivityRepository.class);
         activityFileService = mock(ActivityFileService.class);
