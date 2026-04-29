@@ -92,6 +92,11 @@ p,
     letter-spacing: normal;
 }
 
+/* Preserve line-breaks */
+.preserve-linebreaks {
+    white-space: pre-line;
+}
+
 /* Navigation */
 .navbar {
     background: linear-gradient(135deg, var(--dark-color) 0%, #2d0052 100%) !important;
