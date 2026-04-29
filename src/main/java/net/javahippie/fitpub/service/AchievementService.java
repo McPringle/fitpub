@@ -109,10 +109,12 @@ public class AchievementService {
         List<Activity> activityHistory = activityRepository.findByUserIdOrderByStartedAtAsc(userId);
         if (activityHistory.isEmpty()) {
             achievementRepository.deleteByUserId(userId);
+            achievementRepository.flush();
             return List.of();
         }
 
         achievementRepository.deleteByUserId(userId);
+        achievementRepository.flush();
 
         Set<Achievement.AchievementType> existing = EnumSet.noneOf(Achievement.AchievementType.class);
         List<Achievement> rebuiltAchievements = new ArrayList<>();
