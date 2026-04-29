@@ -337,6 +337,73 @@ class KomootImportServiceTest {
     }
 
     @Test
+    @DisplayName("Should map Komoot cycling sport racebike to ride")
+    void shouldMapKomootRacebikeToRide() {
+        String authHeader = "Basic " + Base64.getEncoder()
+                .encodeToString("user@example.com:secret".getBytes(StandardCharsets.UTF_8));
+        UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        UUID importedActivityId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        KomootImportService throttledService = spy(service);
+        doNothing().when(throttledService).pauseBetweenDetailAndGpxRequest();
+        doNothing().when(throttledService).pauseAfterActivityImport();
+
+        when(komootImportRepository.findByUserIdAndKomootActivityId(userId, 2880957037L)).thenReturn(Optional.empty());
+
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/2880957037?hl=en"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andRespond(withSuccess("""
+                        {
+                          "id": "2880957037",
+                          "name": "Road Ride",
+                          "description": "Komoot road cycling type",
+                          "status": "private",
+                          "sport": "racebike"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/2880957037.gpx"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, authHeader))
+                .andExpect(header(HttpHeaders.ACCEPT, "application/gpx+xml, application/xml, text/xml"))
+                .andRespond(withSuccess("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <gpx version="1.1" creator="komoot">
+                          <trk><name>Road Ride</name></trk>
+                        </gpx>
+                        """, MediaType.APPLICATION_XML));
+
+        Activity importedActivity = Activity.builder()
+                .id(importedActivityId)
+                .userId(userId)
+                .activityType(Activity.ActivityType.OTHER)
+                .title("GPX Title")
+                .description(null)
+                .visibility(Activity.Visibility.PRIVATE)
+                .sourceFileFormat("GPX")
+                .build();
+
+        when(activityFileService.processActivityFile(any(), any(), any(), any(), any())).thenReturn(importedActivity);
+        when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(komootImportRepository.save(any(KomootImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        KomootImportExecutionResponse response = throttledService.importActivity(
+                new KomootActivityImportRequest("user@example.com", "secret", "123456", 2880957037L),
+                userId
+        );
+
+        assertThat(response.getImportedActivityId()).isEqualTo(importedActivityId);
+        assertThat(response.getStatus()).isEqualTo("IMPORTED");
+        assertThat(importedActivity.getActivityType()).isEqualTo(Activity.ActivityType.RIDE);
+        verify(komootImportRepository).save(any(KomootImport.class));
+
+        verify(throttledService).pauseBetweenDetailAndGpxRequest();
+        verify(throttledService).pauseAfterActivityImport();
+        verify(activityPostProcessingService).processActivityAsync(importedActivityId, userId);
+        server.verify();
+    }
+
+    @Test
     @DisplayName("Should fall back to OTHER when Komoot sport cannot be mapped")
     void shouldFallbackToOtherForUnknownKomootSport() {
         String authHeader = "Basic " + Base64.getEncoder()

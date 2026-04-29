@@ -397,7 +397,7 @@ public class KomootImportService {
             case "hike" -> Activity.ActivityType.HIKE;
             case "walk" -> Activity.ActivityType.WALK;
             case "run", "trailrunning", "jogging" -> Activity.ActivityType.RUN;
-            case "touringbicycle", "road_bike", "bike", "bicycle", "gravel", "mtb", "mtb_easy", "mtb_advanced", "ebike" ->
+            case "touringbicycle", "road_bike", "racebike", "bike", "bicycle", "gravel", "mtb", "mtb_easy", "mtb_advanced", "ebike" ->
                     Activity.ActivityType.RIDE;
             case "alpine_ski" -> Activity.ActivityType.ALPINE_SKI;
             case "backcountry_ski" -> Activity.ActivityType.BACKCOUNTRY_SKI;
