@@ -8,15 +8,20 @@
 </head>
 <body>
 <div layout:fragment="content">
-    <div class="container py-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1>
-                <i class="bi bi-award-fill" style="color: var(--accent-orange);"></i> Achievements
-            </h1>
-            <a href="/analytics" class="btn btn-outline-primary">
-                <i class="bi bi-arrow-left"></i> Back to Dashboard
-            </a>
-        </div>
+        <div class="container py-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1>
+                    <i class="bi bi-award-fill" style="color: var(--accent-orange);"></i> Achievements
+                </h1>
+                <div class="d-flex gap-2">
+                    <button id="rebuild-achievements-btn" type="button" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-repeat"></i> Recalculate
+                    </button>
+                    <a href="/analytics" class="btn btn-outline-primary">
+                        <i class="bi bi-arrow-left"></i> Back to Dashboard
+                    </a>
+                </div>
+            </div>
 
         <!-- Stats Summary -->
         <div class="row g-3 mb-4">
@@ -100,6 +105,35 @@
             }
         }
 
+        async function rebuildAchievements() {
+            const rebuildBtn = document.getElementById('rebuild-achievements-btn');
+            const originalContent = rebuildBtn.innerHTML;
+
+            rebuildBtn.disabled = true;
+            rebuildBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Recalculating...';
+
+            try {
+                const response = await FitPubAuth.authenticatedFetch('/api/analytics/achievements/rebuild', {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.message || 'Failed to recalculate achievements');
+                }
+
+                FitPub.showAlert('success', result.message || 'Achievements recalculated successfully');
+                await loadAchievements();
+            } catch (error) {
+                console.error('Error rebuilding achievements:', error);
+                FitPub.showAlert('danger', error.message || 'Failed to recalculate achievements');
+            } finally {
+                rebuildBtn.disabled = false;
+                rebuildBtn.innerHTML = originalContent;
+            }
+        }
+
         function updateStats(achievements) {
             // Earned count
             document.getElementById('earned-count').textContent = achievements.length;
@@ -108,6 +142,8 @@
             if (achievements.length > 0) {
                 const latest = new Date(achievements[0].earnedAt);
                 document.getElementById('latest-date').textContent = latest.toLocaleDateString();
+            } else {
+                document.getElementById('latest-date').textContent = '-';
             }
 
             // Completion percentage
@@ -217,6 +253,7 @@
                 window.location.href = '/auth/login';
                 return;
             }
+            document.getElementById('rebuild-achievements-btn').addEventListener('click', rebuildAchievements);
             loadAchievements();
         });
     </script>
