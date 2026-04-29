@@ -441,6 +441,7 @@
                     let importedCount = 0;
                     let failedCount = 0;
                     let cancelled = false;
+                    let rateLimited = false;
                     const totalActivitiesToImport = activitiesToImport.length;
 
                     for (const [index, activity] of activitiesToImport.entries()) {
@@ -454,6 +455,15 @@
                                 method: 'POST',
                                 body: buildImportPayload(activity.id)
                             });
+
+                            if (response.status === 429) {
+                                rateLimited = true;
+                                activity.uiImportStatus = null;
+                                activity.uiImportError = null;
+                                resetQueuedActivities();
+                                renderActivities(currentActivities);
+                                break;
+                            }
 
                             if (!response.ok) {
                                 let message = 'Failed to import Komoot activity.';
@@ -490,7 +500,9 @@
                         }
                     }
 
-                    if (cancelled) {
+                    if (rateLimited) {
+                        showStatus('Komoot rate limit reached. Import stopped. Please try again later.');
+                    } else if (cancelled) {
                         showStatus(`Import stopped after the current activity. Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
                     } else {
                         showStatus(`Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
