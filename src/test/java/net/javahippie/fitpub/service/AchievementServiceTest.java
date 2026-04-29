@@ -411,6 +411,7 @@ class AchievementServiceTest {
 
         InOrder inOrder = inOrder(achievementRepository);
         inOrder.verify(achievementRepository).deleteByUserId(userId);
+        inOrder.verify(achievementRepository).flush();
         inOrder.verify(achievementRepository, atLeastOnce()).save(any(Achievement.class));
     }
 
