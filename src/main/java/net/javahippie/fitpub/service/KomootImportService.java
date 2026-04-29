@@ -243,9 +243,7 @@ public class KomootImportService {
         headers.setAccept(List.of(MediaType.parseMediaType("application/hal+json"), MediaType.APPLICATION_JSON));
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAcceptLanguageAsLocales(List.of(java.util.Locale.ENGLISH));
-        headers.set(HttpHeaders.USER_AGENT,
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                        + "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
+        headers.set(HttpHeaders.USER_AGENT, "FitPub Komoot Import");
         headers.set(HttpHeaders.AUTHORIZATION, basicAuth(email, password));
         return headers;
     }
