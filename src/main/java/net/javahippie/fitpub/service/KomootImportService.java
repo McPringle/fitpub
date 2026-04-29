@@ -9,7 +9,9 @@ import net.javahippie.fitpub.model.dto.KomootActivitySummaryDTO;
 import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
 import net.javahippie.fitpub.model.dto.KomootImportRequest;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.KomootImport;
 import net.javahippie.fitpub.repository.ActivityRepository;
+import net.javahippie.fitpub.repository.KomootImportRepository;
 import net.javahippie.fitpub.util.ByteArrayMultipartFile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -57,6 +59,7 @@ public class KomootImportService {
     private static final DateTimeFormatter KOMOOT_DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSX");
     private final RestTemplate restTemplate;
     private final ActivityRepository activityRepository;
+    private final KomootImportRepository komootImportRepository;
     private final ActivityFileService activityFileService;
     private final ActivityPostProcessingService activityPostProcessingService;
 
@@ -75,18 +78,18 @@ public class KomootImportService {
     public KomootActivitiesResponse fetchCompletedActivities(KomootImportRequest request, UUID fitPubUserId) {
         List<KomootActivitySummaryDTO> activities = new ArrayList<>();
         Set<Long> importedKomootActivityIds = new HashSet<>(
-                activityRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
+                komootImportRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
         Map<Long, UUID> fitPubActivityIdsByKomootId = new HashMap<>();
         if (!importedKomootActivityIds.isEmpty()) {
-            activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(
+            komootImportRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(
                             fitPubUserId,
                             new ArrayList<>(importedKomootActivityIds)
                     )
-                    .forEach(link -> fitPubActivityIdsByKomootId.put(link.getKomootActivityId(), link.getId()));
+                    .forEach(link -> fitPubActivityIdsByKomootId.put(link.getKomootActivityId(), link.getActivityId()));
         }
 
         URI nextUri = buildInitialUri(request);
-        HttpEntity<Void> httpEntity = new HttpEntity<>(buildHeaders(request.email(), request.password()));
+        HttpEntity<Void> httpEntity = new HttpEntity<>(buildHeaders(request.getEmail(), request.getPassword()));
 
         try {
             while (nextUri != null) {
@@ -113,8 +116,8 @@ public class KomootImportService {
             throw new IllegalStateException("Failed to parse Komoot activity list.", e);
         }
 
-        log.info("Fetched {} completed Komoot activities for user ID {}", activities.size(), request.userId());
-        return new KomootActivitiesResponse(request.userId(), activities.size(), activities);
+        log.info("Fetched {} completed Komoot activities for user ID {}", activities.size(), request.getUserId());
+        return new KomootActivitiesResponse(request.getUserId(), activities.size(), activities);
     }
 
     void pauseBeforeNextPageRequest() {
@@ -122,29 +125,29 @@ public class KomootImportService {
     }
 
     public KomootImportExecutionResponse importActivity(KomootActivityImportRequest request, UUID fitPubUserId) {
-        Activity existingActivity = activityRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.activityId()).orElse(null);
-        if (existingActivity != null) {
+        KomootImport existingImport = komootImportRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.getActivityId()).orElse(null);
+        if (existingImport != null) {
             return new KomootImportExecutionResponse(
-                    existingActivity.getId(),
-                    request.activityId(),
+                    existingImport.getActivityId(),
+                    request.getActivityId(),
                     "SKIPPED_ALREADY_IMPORTED",
-                    "Komoot activity " + request.activityId() + " was already imported."
+                    "Komoot activity " + request.getActivityId() + " was already imported."
             );
         }
 
-        JsonNode details = fetchActivityDetails(request.email(), request.password(), request.activityId());
+        JsonNode details = fetchActivityDetails(request.getEmail(), request.getPassword(), request.getActivityId());
         pauseBetweenDetailAndGpxRequest();
-        byte[] gpxData = fetchActivityGpx(request.email(), request.password(), request.activityId());
+        byte[] gpxData = fetchActivityGpx(request.getEmail(), request.getPassword(), request.getActivityId());
 
         ByteArrayMultipartFile gpxFile = new ByteArrayMultipartFile(
                 "file",
-                "komoot-" + request.activityId() + ".gpx",
+                "komoot-" + request.getActivityId() + ".gpx",
                 "application/gpx+xml",
                 gpxData
         );
 
         Activity.Visibility mappedVisibility = mapVisibility(nullableText(details, "status"));
-        String mappedTitle = firstNonBlank(nullableText(details, "name"), null, "Komoot Activity " + request.activityId());
+        String mappedTitle = firstNonBlank(nullableText(details, "name"), null, "Komoot Activity " + request.getActivityId());
         String mappedDescription = nullableText(details, "description");
         Activity.ActivityType mappedActivityType = mapKomootSportToActivityType(nullableText(details, "sport"));
 
@@ -156,18 +159,22 @@ public class KomootImportService {
                 mappedVisibility
         );
 
-        importedActivity.setKomootActivityId(request.activityId());
         importedActivity.setTitle(mappedTitle);
         importedActivity.setDescription(mappedDescription);
         importedActivity.setVisibility(mappedVisibility);
         importedActivity.setActivityType(mappedActivityType);
 
         importedActivity = activityRepository.save(importedActivity);
+        komootImportRepository.save(KomootImport.builder()
+                .userId(fitPubUserId)
+                .activityId(importedActivity.getId())
+                .komootActivityId(request.getActivityId())
+                .build());
         activityPostProcessingService.processActivityAsync(importedActivity.getId(), fitPubUserId);
 
         log.info(
                 "Imported Komoot activity {} into FitPub activity {} with visibility {} and type {}",
-                request.activityId(),
+                request.getActivityId(),
                 importedActivity.getId(),
                 importedActivity.getVisibility(),
                 importedActivity.getActivityType()
@@ -177,9 +184,9 @@ public class KomootImportService {
 
         return new KomootImportExecutionResponse(
                 importedActivity.getId(),
-                request.activityId(),
+                request.getActivityId(),
                 "IMPORTED",
-                "Imported Komoot activity " + request.activityId() + " into FitPub activity " + importedActivity.getId()
+                "Imported Komoot activity " + request.getActivityId() + " into FitPub activity " + importedActivity.getId()
         );
     }
 
@@ -193,15 +200,15 @@ public class KomootImportService {
 
     private URI buildInitialUri(KomootImportRequest request) {
         String normalizedBaseUrl = komootBaseUrl.endsWith("/") ? komootBaseUrl.substring(0, komootBaseUrl.length() - 1) : komootBaseUrl;
-        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(normalizedBaseUrl + "/api/v007/users/" + request.userId() + "/tours/")
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(normalizedBaseUrl + "/api/v007/users/" + request.getUserId() + "/tours/")
                 .queryParam("type", "tour_recorded")
                 .queryParam("sort_field", "date")
                 .queryParam("sort_direction", "desc")
                 .queryParam("limit", PAGE_SIZE);
 
-        if (request.startDate() != null && request.endDate() != null) {
-            builder.queryParam("start_date", formatKomootStartDate(request.startDate()))
-                    .queryParam("end_date", formatKomootEndDate(request.endDate()));
+        if (request.getStartDate() != null && request.getEndDate() != null) {
+            builder.queryParam("start_date", formatKomootStartDate(request.getStartDate()))
+                    .queryParam("end_date", formatKomootEndDate(request.getEndDate()));
         } else {
             builder.queryParam("status", "private")
                     .queryParam("name", "")
