@@ -9,7 +9,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,5 +39,31 @@ class ActivityDeleteRecalculationServiceTest {
         verify(activitySummaryService).updateWeeklySummary(userId, activityDate);
         verify(activitySummaryService).updateMonthlySummary(userId, activityDate);
         verify(activitySummaryService).updateYearlySummary(userId, activityDate);
+    }
+
+    @Test
+    @DisplayName("Should serialize recalculations per user and replay queued deletions")
+    void shouldSerializeRecalculationsPerUserAndReplayQueuedDeletions() {
+        UUID userId = UUID.randomUUID();
+        LocalDate firstDate = LocalDate.of(2025, 12, 3);
+        LocalDate secondDate = LocalDate.of(2025, 12, 4);
+        AtomicBoolean queuedSecondDelete = new AtomicBoolean(false);
+
+        doAnswer(invocation -> {
+            if (queuedSecondDelete.compareAndSet(false, true)) {
+                activityDeleteRecalculationService.handleActivityDeleted(new ActivityDeletedEvent(userId, secondDate));
+            }
+            return null;
+        }).when(achievementService).rebuildAchievementsForUser(userId);
+
+        activityDeleteRecalculationService.handleActivityDeleted(new ActivityDeletedEvent(userId, firstDate));
+
+        verify(achievementService, times(2)).rebuildAchievementsForUser(userId);
+        verify(activitySummaryService).updateWeeklySummary(userId, firstDate);
+        verify(activitySummaryService).updateMonthlySummary(userId, firstDate);
+        verify(activitySummaryService).updateYearlySummary(userId, firstDate);
+        verify(activitySummaryService).updateWeeklySummary(userId, secondDate);
+        verify(activitySummaryService).updateMonthlySummary(userId, secondDate);
+        verify(activitySummaryService).updateYearlySummary(userId, secondDate);
     }
 }
