@@ -41,10 +41,8 @@ public class AchievementService {
      */
     @Transactional
     public List<Achievement> checkAndAwardAchievements(Activity activity) {
-        List<Achievement> newAchievements = new ArrayList<>();
-
         if (activity.getUserId() == null || activity.getStartedAt() == null || activity.getEndedAt() == null) {
-            return newAchievements;
+            return List.of();
         }
 
         UUID userId = activity.getUserId();
@@ -58,6 +56,15 @@ public class AchievementService {
         for (Achievement a : achievementRepository.findByUserIdOrderByEarnedAtDesc(userId)) {
             existing.add(a.getAchievementType());
         }
+
+        return checkAndAwardAchievements(activity, progress, existing);
+    }
+
+    private List<Achievement> checkAndAwardAchievements(Activity activity,
+                                                        ActivityProgress progress,
+                                                        Set<Achievement.AchievementType> existing) {
+        List<Achievement> newAchievements = new ArrayList<>();
+        UUID userId = activity.getUserId();
 
         // Check first activity achievements
         newAchievements.addAll(checkFirstActivityAchievements(userId, activity, progress, existing));
@@ -83,6 +90,10 @@ public class AchievementService {
         // Check speed achievements
         newAchievements.addAll(checkSpeedAchievements(userId, activity, progress, existing));
 
+        for (Achievement achievement : newAchievements) {
+            existing.add(achievement.getAchievementType());
+        }
+
         return newAchievements;
     }
 
@@ -103,9 +114,15 @@ public class AchievementService {
 
         achievementRepository.deleteByUserId(userId);
 
+        Set<Achievement.AchievementType> existing = EnumSet.noneOf(Achievement.AchievementType.class);
         List<Achievement> rebuiltAchievements = new ArrayList<>();
-        for (Activity activity : activityHistory) {
-            rebuiltAchievements.addAll(checkAndAwardAchievements(activity));
+        for (int i = 0; i < activityHistory.size(); i++) {
+            Activity activity = activityHistory.get(i);
+            rebuiltAchievements.addAll(checkAndAwardAchievements(
+                    activity,
+                    ActivityProgress.fromHistory(activityHistory, i),
+                    existing
+            ));
         }
 
         return rebuiltAchievements;
@@ -560,6 +577,10 @@ public class AchievementService {
                 throw new IllegalStateException("Current activity missing from chronological history: " + currentActivity.getId());
             }
 
+            return fromHistory(activityHistory, currentIndex);
+        }
+
+        private static ActivityProgress fromHistory(List<Activity> activityHistory, int currentIndex) {
             return new ActivityProgress(
                     List.copyOf(activityHistory.subList(0, currentIndex)),
                     List.copyOf(activityHistory.subList(0, currentIndex + 1))
