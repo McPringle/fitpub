@@ -2,6 +2,7 @@ package net.javahippie.fitpub.repository;
 
 import net.javahippie.fitpub.model.entity.Achievement;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -39,6 +40,12 @@ public interface AchievementRepository extends JpaRepository<Achievement, UUID> 
      * Get count of achievements earned by a user.
      */
     long countByUserId(UUID userId);
+
+    /**
+     * Delete all achievements for a user.
+     */
+    @Modifying
+    void deleteByUserId(UUID userId);
 
     /**
      * Get count of achievements earned by a user in a date range.

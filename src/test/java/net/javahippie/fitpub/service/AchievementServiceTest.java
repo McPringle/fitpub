@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -389,6 +390,28 @@ class AchievementServiceTest {
 
         assertEquals(activity.getEndedAt(), distanceAchievement.getEarnedAt());
         assertEquals(activity.getId(), distanceAchievement.getActivityId());
+    }
+
+    @Test
+    @DisplayName("Should rebuild achievements by deleting existing rows and replaying history")
+    void testRebuildAchievementsForUser() {
+        Activity previous = createActivity(Activity.ActivityType.RUN, 9000L, BigDecimal.ZERO);
+        previous.setStartedAt(LocalDateTime.of(2025, 11, 30, 10, 0));
+        previous.setEndedAt(LocalDateTime.of(2025, 11, 30, 11, 0));
+        Activity activity = createActivity(Activity.ActivityType.RUN, 2000L, BigDecimal.ZERO);
+        activity.setStartedAt(LocalDateTime.of(2025, 12, 1, 7, 15));
+        activity.setEndedAt(LocalDateTime.of(2025, 12, 1, 8, 5));
+
+        stubHistory(previous, activity);
+        when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<Achievement> rebuilt = achievementService.rebuildAchievementsForUser(userId);
+
+        assertTrue(rebuilt.stream().anyMatch(a -> a.getAchievementType() == Achievement.AchievementType.DISTANCE_10K));
+
+        InOrder inOrder = inOrder(achievementRepository);
+        inOrder.verify(achievementRepository).deleteByUserId(userId);
+        inOrder.verify(achievementRepository, atLeastOnce()).save(any(Achievement.class));
     }
 
     @Test

@@ -87,6 +87,31 @@ public class AchievementService {
     }
 
     /**
+     * Rebuild all achievements for a user from chronological activity history.
+     */
+    @Transactional
+    public List<Achievement> rebuildAchievementsForUser(UUID userId) {
+        if (userId == null) {
+            return List.of();
+        }
+
+        List<Activity> activityHistory = activityRepository.findByUserIdOrderByStartedAtAsc(userId);
+        if (activityHistory.isEmpty()) {
+            achievementRepository.deleteByUserId(userId);
+            return List.of();
+        }
+
+        achievementRepository.deleteByUserId(userId);
+
+        List<Achievement> rebuiltAchievements = new ArrayList<>();
+        for (Activity activity : activityHistory) {
+            rebuiltAchievements.addAll(checkAndAwardAchievements(activity));
+        }
+
+        return rebuiltAchievements;
+    }
+
+    /**
      * Check first activity achievements.
      */
     private List<Achievement> checkFirstActivityAchievements(UUID userId, Activity activity,
