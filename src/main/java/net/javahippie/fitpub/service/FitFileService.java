@@ -319,6 +319,7 @@ public class FitFileService {
         return activityRepository.findByIdAndUserId(activityId, userId)
             .map(activity -> {
                 activityRepository.delete(activity);
+                achievementService.rebuildAchievementsForUser(userId);
                 log.info("Deleted activity {} for user {}", activityId, userId);
                 return true;
             })

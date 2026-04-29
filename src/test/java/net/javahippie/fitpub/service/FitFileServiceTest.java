@@ -238,6 +238,7 @@ class FitFileServiceTest {
         // Assert
         assertTrue(result);
         verify(activityRepository).delete(activity);
+        verify(achievementService).rebuildAchievementsForUser(testUserId);
     }
 
     @Test
@@ -254,6 +255,7 @@ class FitFileServiceTest {
         // Assert
         assertFalse(result);
         verify(activityRepository, never()).delete(any());
+        verify(achievementService, never()).rebuildAchievementsForUser(any());
     }
 
     @Test
