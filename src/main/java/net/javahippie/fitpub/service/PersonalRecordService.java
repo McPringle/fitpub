@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.model.entity.PersonalRecord;
+import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.PersonalRecordRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ import java.util.UUID;
 @Slf4j
 public class PersonalRecordService {
 
+    private final ActivityRepository activityRepository;
     private final PersonalRecordRepository personalRecordRepository;
 
     /**
@@ -319,5 +321,20 @@ public class PersonalRecordService {
     @Transactional(readOnly = true)
     public long getPersonalRecordCount(UUID userId) {
         return personalRecordRepository.countByUserId(userId);
+    }
+
+    /**
+     * Rebuild all personal records for a user from remaining activities.
+     */
+    @Transactional
+    public void rebuildPersonalRecordsForUser(UUID userId) {
+        personalRecordRepository.deleteByUserId(userId);
+
+        List<Activity> activities = activityRepository.findByUserIdOrderByStartedAtAsc(userId);
+        for (Activity activity : activities) {
+            checkAndUpdatePersonalRecords(activity);
+        }
+
+        log.info("Rebuilt personal records for user {} from {} activities", userId, activities.size());
     }
 }

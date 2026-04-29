@@ -24,6 +24,9 @@ class ActivityDeleteRecalculationServiceTest {
     @Mock
     private ActivitySummaryService activitySummaryService;
 
+    @Mock
+    private PersonalRecordService personalRecordService;
+
     @InjectMocks
     private ActivityDeleteRecalculationService activityDeleteRecalculationService;
 
@@ -36,6 +39,7 @@ class ActivityDeleteRecalculationServiceTest {
         activityDeleteRecalculationService.handleActivityDeleted(new ActivityDeletedEvent(userId, activityDate));
 
         verify(achievementService).rebuildAchievementsForUser(userId);
+        verify(personalRecordService).rebuildPersonalRecordsForUser(userId);
         verify(activitySummaryService).updateWeeklySummary(userId, activityDate);
         verify(activitySummaryService).updateMonthlySummary(userId, activityDate);
         verify(activitySummaryService).updateYearlySummary(userId, activityDate);
@@ -59,6 +63,7 @@ class ActivityDeleteRecalculationServiceTest {
         activityDeleteRecalculationService.handleActivityDeleted(new ActivityDeletedEvent(userId, firstDate));
 
         verify(achievementService, times(2)).rebuildAchievementsForUser(userId);
+        verify(personalRecordService, times(2)).rebuildPersonalRecordsForUser(userId);
         verify(activitySummaryService).updateWeeklySummary(userId, firstDate);
         verify(activitySummaryService).updateMonthlySummary(userId, firstDate);
         verify(activitySummaryService).updateYearlySummary(userId, firstDate);

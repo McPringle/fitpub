@@ -24,6 +24,7 @@ public class ActivityDeleteRecalculationService {
 
     private final AchievementService achievementService;
     private final ActivitySummaryService activitySummaryService;
+    private final PersonalRecordService personalRecordService;
     private final ConcurrentMap<UUID, PendingUserRecalculation> pendingRecalculations = new ConcurrentHashMap<>();
 
     @Async
@@ -42,6 +43,7 @@ public class ActivityDeleteRecalculationService {
         do {
             Set<LocalDate> datesToRecalculate = pending.drainDates();
             achievementService.rebuildAchievementsForUser(event.userId());
+            personalRecordService.rebuildPersonalRecordsForUser(event.userId());
             for (LocalDate date : datesToRecalculate) {
                 activitySummaryService.updateWeeklySummary(event.userId(), date);
                 activitySummaryService.updateMonthlySummary(event.userId(), date);
@@ -49,7 +51,7 @@ public class ActivityDeleteRecalculationService {
             }
         } while (pending.keepProcessing());
 
-        log.info("Recalculated achievements and summaries after deleting activities for user {}", event.userId());
+        log.info("Recalculated achievements, personal records, and summaries after deleting activities for user {}", event.userId());
     }
 
     private static final class PendingUserRecalculation {
