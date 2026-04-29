@@ -20,36 +20,8 @@ import java.util.UUID;
 @Repository
 public interface ActivityRepository extends JpaRepository<Activity, UUID> {
 
-    interface KomootImportLinkProjection {
-        UUID getId();
-        Long getKomootActivityId();
-    }
-
     @Query("SELECT a.id FROM Activity a")
     List<UUID> findAllIds();
-
-    /**
-     * Returns all imported Komoot activity IDs for the given local user.
-     */
-    @Query("SELECT a.komootActivityId FROM Activity a " +
-           "WHERE a.userId = :userId AND a.komootActivityId IS NOT NULL")
-    List<Long> findImportedKomootActivityIdsByUserId(@Param("userId") UUID userId);
-
-    /**
-     * Finds a previously imported Komoot activity for the given user.
-     */
-    Optional<Activity> findByUserIdAndKomootActivityId(UUID userId, Long komootActivityId);
-
-    /**
-     * Finds imported Komoot activities for the given user and Komoot IDs.
-     */
-    @Query("SELECT a.id AS id, a.komootActivityId AS komootActivityId " +
-           "FROM Activity a " +
-           "WHERE a.userId = :userId AND a.komootActivityId IN :komootActivityIds")
-    List<KomootImportLinkProjection> findKomootImportLinksByUserIdAndKomootActivityIdIn(
-            @Param("userId") UUID userId,
-            @Param("komootActivityIds") List<Long> komootActivityIds
-    );
 
     /**
      * Find all activities for a specific user.

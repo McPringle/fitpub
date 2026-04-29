@@ -9,7 +9,9 @@ import net.javahippie.fitpub.model.dto.KomootActivitySummaryDTO;
 import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
 import net.javahippie.fitpub.model.dto.KomootImportRequest;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.KomootImport;
 import net.javahippie.fitpub.repository.ActivityRepository;
+import net.javahippie.fitpub.repository.KomootImportRepository;
 import net.javahippie.fitpub.util.ByteArrayMultipartFile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -57,6 +59,7 @@ public class KomootImportService {
     private static final DateTimeFormatter KOMOOT_DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSX");
     private final RestTemplate restTemplate;
     private final ActivityRepository activityRepository;
+    private final KomootImportRepository komootImportRepository;
     private final ActivityFileService activityFileService;
     private final ActivityPostProcessingService activityPostProcessingService;
 
@@ -75,14 +78,14 @@ public class KomootImportService {
     public KomootActivitiesResponse fetchCompletedActivities(KomootImportRequest request, UUID fitPubUserId) {
         List<KomootActivitySummaryDTO> activities = new ArrayList<>();
         Set<Long> importedKomootActivityIds = new HashSet<>(
-                activityRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
+                komootImportRepository.findImportedKomootActivityIdsByUserId(fitPubUserId));
         Map<Long, UUID> fitPubActivityIdsByKomootId = new HashMap<>();
         if (!importedKomootActivityIds.isEmpty()) {
-            activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(
+            komootImportRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(
                             fitPubUserId,
                             new ArrayList<>(importedKomootActivityIds)
                     )
-                    .forEach(link -> fitPubActivityIdsByKomootId.put(link.getKomootActivityId(), link.getId()));
+                    .forEach(link -> fitPubActivityIdsByKomootId.put(link.getKomootActivityId(), link.getActivityId()));
         }
 
         URI nextUri = buildInitialUri(request);
@@ -122,10 +125,10 @@ public class KomootImportService {
     }
 
     public KomootImportExecutionResponse importActivity(KomootActivityImportRequest request, UUID fitPubUserId) {
-        Activity existingActivity = activityRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.getActivityId()).orElse(null);
-        if (existingActivity != null) {
+        KomootImport existingImport = komootImportRepository.findByUserIdAndKomootActivityId(fitPubUserId, request.getActivityId()).orElse(null);
+        if (existingImport != null) {
             return new KomootImportExecutionResponse(
-                    existingActivity.getId(),
+                    existingImport.getActivityId(),
                     request.getActivityId(),
                     "SKIPPED_ALREADY_IMPORTED",
                     "Komoot activity " + request.getActivityId() + " was already imported."
@@ -156,13 +159,17 @@ public class KomootImportService {
                 mappedVisibility
         );
 
-        importedActivity.setKomootActivityId(request.getActivityId());
         importedActivity.setTitle(mappedTitle);
         importedActivity.setDescription(mappedDescription);
         importedActivity.setVisibility(mappedVisibility);
         importedActivity.setActivityType(mappedActivityType);
 
         importedActivity = activityRepository.save(importedActivity);
+        komootImportRepository.save(KomootImport.builder()
+                .userId(fitPubUserId)
+                .activityId(importedActivity.getId())
+                .komootActivityId(request.getActivityId())
+                .build());
         activityPostProcessingService.processActivityAsync(importedActivity.getId(), fitPubUserId);
 
         log.info(

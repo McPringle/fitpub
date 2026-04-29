@@ -5,7 +5,9 @@ import net.javahippie.fitpub.model.dto.KomootActivitiesResponse;
 import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
 import net.javahippie.fitpub.model.dto.KomootImportRequest;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.KomootImport;
 import net.javahippie.fitpub.repository.ActivityRepository;
+import net.javahippie.fitpub.repository.KomootImportRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,10 +43,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class KomootImportServiceTest {
 
-    private static ActivityRepository.KomootImportLinkProjection importLink(UUID activityId, Long komootActivityId) {
-        return new ActivityRepository.KomootImportLinkProjection() {
+    private static KomootImportRepository.KomootImportLinkProjection importLink(UUID activityId, Long komootActivityId) {
+        return new KomootImportRepository.KomootImportLinkProjection() {
             @Override
-            public UUID getId() {
+            public UUID getActivityId() {
                 return activityId;
             }
 
@@ -58,6 +60,7 @@ class KomootImportServiceTest {
     private MockRestServiceServer server;
     private KomootImportService service;
     private ActivityRepository activityRepository;
+    private KomootImportRepository komootImportRepository;
     private ActivityFileService activityFileService;
     private ActivityPostProcessingService activityPostProcessingService;
     private TimeZone originalTimeZone;
@@ -69,9 +72,10 @@ class KomootImportServiceTest {
         RestTemplate restTemplate = new RestTemplate();
         server = MockRestServiceServer.bindTo(restTemplate).build();
         activityRepository = mock(ActivityRepository.class);
+        komootImportRepository = mock(KomootImportRepository.class);
         activityFileService = mock(ActivityFileService.class);
         activityPostProcessingService = mock(ActivityPostProcessingService.class);
-        service = new KomootImportService(restTemplate, activityRepository, activityFileService, activityPostProcessingService);
+        service = new KomootImportService(restTemplate, activityRepository, komootImportRepository, activityFileService, activityPostProcessingService);
         ReflectionTestUtils.setField(service, "komootBaseUrl", "https://www.komoot.com");
         ReflectionTestUtils.setField(service, "paginatedRequestDelayMillis", 0L);
         ReflectionTestUtils.setField(service, "detailToGpxDelayMillis", 0L);
@@ -92,8 +96,8 @@ class KomootImportServiceTest {
         doNothing().when(throttledService).pauseBeforeNextPageRequest();
         UUID existingActivityId = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
 
-        when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1002L));
-        when(activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(userId, List.of(1002L)))
+        when(komootImportRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1002L));
+        when(komootImportRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(userId, List.of(1002L)))
                 .thenReturn(List.of(importLink(existingActivityId, 1002L)));
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&status=private&name=&hl=en&page=0"))
@@ -176,8 +180,8 @@ class KomootImportServiceTest {
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         UUID existingActivityId = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
-        when(activityRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1003L));
-        when(activityRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(userId, List.of(1003L)))
+        when(komootImportRepository.findImportedKomootActivityIdsByUserId(userId)).thenReturn(List.of(1003L));
+        when(komootImportRepository.findKomootImportLinksByUserIdAndKomootActivityIdIn(userId, List.of(1003L)))
                 .thenReturn(List.of(importLink(existingActivityId, 1003L)));
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/users/123456/tours/?type=tour_recorded&sort_field=date&sort_direction=desc&limit=100&start_date=2026-04-25T22:00:00.000Z&end_date=2026-04-27T21:59:59.999Z"))
@@ -252,7 +256,7 @@ class KomootImportServiceTest {
         doNothing().when(throttledService).pauseBetweenDetailAndGpxRequest();
         doNothing().when(throttledService).pauseAfterActivityImport();
 
-        when(activityRepository.findByUserIdAndKomootActivityId(userId, 2880957035L)).thenReturn(Optional.empty());
+        when(komootImportRepository.findByUserIdAndKomootActivityId(userId, 2880957035L)).thenReturn(Optional.empty());
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/2880957035?hl=en"))
                 .andExpect(method(HttpMethod.GET))
@@ -290,6 +294,7 @@ class KomootImportServiceTest {
 
         when(activityFileService.processActivityFile(any(), any(), any(), any(), any())).thenReturn(importedActivity);
         when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(komootImportRepository.save(any(KomootImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         KomootImportExecutionResponse response = throttledService.importActivity(
                 new KomootActivityImportRequest("user@example.com", "secret", "123456", 2880957035L),
@@ -299,11 +304,11 @@ class KomootImportServiceTest {
         assertThat(response.getImportedActivityId()).isEqualTo(importedActivityId);
         assertThat(response.getImportedKomootActivityId()).isEqualTo(2880957035L);
         assertThat(response.getStatus()).isEqualTo("IMPORTED");
-        assertThat(importedActivity.getKomootActivityId()).isEqualTo(2880957035L);
         assertThat(importedActivity.getTitle()).isEqualTo("Latest Ride");
         assertThat(importedActivity.getDescription()).isEqualTo("Imported from Komoot");
         assertThat(importedActivity.getVisibility()).isEqualTo(Activity.Visibility.PUBLIC);
         assertThat(importedActivity.getActivityType()).isEqualTo(Activity.ActivityType.RIDE);
+        verify(komootImportRepository).save(any(KomootImport.class));
 
         verify(throttledService).pauseBetweenDetailAndGpxRequest();
         verify(throttledService).pauseAfterActivityImport();
@@ -317,8 +322,8 @@ class KomootImportServiceTest {
         UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         UUID existingActivityId = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
-        when(activityRepository.findByUserIdAndKomootActivityId(userId, 3002L)).thenReturn(
-                Optional.of(Activity.builder().id(existingActivityId).userId(userId).komootActivityId(3002L).build())
+        when(komootImportRepository.findByUserIdAndKomootActivityId(userId, 3002L)).thenReturn(
+                Optional.of(KomootImport.builder().activityId(existingActivityId).userId(userId).komootActivityId(3002L).build())
         );
 
         KomootImportExecutionResponse response = service.importActivity(
@@ -342,7 +347,7 @@ class KomootImportServiceTest {
         doNothing().when(throttledService).pauseBetweenDetailAndGpxRequest();
         doNothing().when(throttledService).pauseAfterActivityImport();
 
-        when(activityRepository.findByUserIdAndKomootActivityId(userId, 2880957036L)).thenReturn(Optional.empty());
+        when(komootImportRepository.findByUserIdAndKomootActivityId(userId, 2880957036L)).thenReturn(Optional.empty());
 
         server.expect(once(), requestTo("https://www.komoot.com/api/v007/tours/2880957036?hl=en"))
                 .andExpect(method(HttpMethod.GET))
@@ -380,6 +385,7 @@ class KomootImportServiceTest {
 
         when(activityFileService.processActivityFile(any(), any(), any(), any(), any())).thenReturn(importedActivity);
         when(activityRepository.save(any(Activity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(komootImportRepository.save(any(KomootImport.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         KomootImportExecutionResponse response = throttledService.importActivity(
                 new KomootActivityImportRequest("user@example.com", "secret", "123456", 2880957036L),
@@ -389,6 +395,7 @@ class KomootImportServiceTest {
         assertThat(response.getImportedActivityId()).isEqualTo(importedActivityId);
         assertThat(response.getStatus()).isEqualTo("IMPORTED");
         assertThat(importedActivity.getActivityType()).isEqualTo(Activity.ActivityType.OTHER);
+        verify(komootImportRepository).save(any(KomootImport.class));
 
         verify(throttledService).pauseBetweenDetailAndGpxRequest();
         verify(throttledService).pauseAfterActivityImport();
