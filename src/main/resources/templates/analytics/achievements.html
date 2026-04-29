@@ -123,11 +123,11 @@
                     throw new Error(result.message || 'Failed to recalculate achievements');
                 }
 
-                FitPub.showAlert('success', result.message || 'Achievements recalculated successfully');
+                FitPub.showAlert(result.message || 'Achievements recalculated successfully', 'success');
                 await loadAchievements();
             } catch (error) {
                 console.error('Error rebuilding achievements:', error);
-                FitPub.showAlert('danger', error.message || 'Failed to recalculate achievements');
+                FitPub.showAlert(error.message || 'Failed to recalculate achievements', 'danger');
             } finally {
                 rebuildBtn.disabled = false;
                 rebuildBtn.innerHTML = originalContent;
