@@ -344,11 +344,9 @@ public class BatchImportService {
                 personalRecordService.checkAndUpdatePersonalRecords(activity);
             }
 
-            // Recalculate achievements for each activity
+            // Recalculate achievements from the full chronological activity history
             log.debug("Recalculating achievements...");
-            for (Activity activity : activities) {
-                achievementService.checkAndAwardAchievements(activity);
-            }
+            achievementService.rebuildAchievementsForUser(job.getUserId());
 
             // Recalculate training load for each activity
             log.debug("Recalculating training load...");

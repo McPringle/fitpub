@@ -60,6 +60,14 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
     List<Activity> findByUserIdOrderByStartedAtDesc(UUID userId);
 
     /**
+     * Find all activities for a specific user in chronological order.
+     *
+     * @param userId the user ID
+     * @return list of activities
+     */
+    List<Activity> findByUserIdOrderByStartedAtAsc(UUID userId);
+
+    /**
      * Find all activities for a user within a date range.
      *
      * @param userId the user ID

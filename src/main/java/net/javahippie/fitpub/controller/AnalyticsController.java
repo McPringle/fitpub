@@ -134,6 +134,25 @@ public class AnalyticsController {
     }
 
     /**
+     * Rebuild achievements for the authenticated user.
+     */
+    @PostMapping("/achievements/rebuild")
+    public ResponseEntity<RebuildResponse> rebuildAchievements(
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        UUID userId = getUserId(userDetails);
+
+        try {
+            achievementService.rebuildAchievementsForUser(userId);
+            return ResponseEntity.ok(new RebuildResponse("Achievements recalculated successfully"));
+        } catch (Exception e) {
+            log.error("Failed to rebuild achievements for user {}", userDetails.getUsername(), e);
+            return ResponseEntity.internalServerError()
+                    .body(new RebuildResponse("Failed to recalculate achievements: " + e.getMessage()));
+        }
+    }
+
+    /**
      * Get training load for a date range.
      */
     @GetMapping("/training-load")
@@ -276,4 +295,6 @@ public class AnalyticsController {
             case UNKNOWN -> "Not enough data to calculate form status.";
         };
     }
+
+    private record RebuildResponse(String message) {}
 }

@@ -9,8 +9,13 @@ import net.javahippie.fitpub.repository.PersonalRecordRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -19,37 +24,39 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class ActivitySummaryServiceTest {
 
+    @Mock
     private ActivitySummaryRepository activitySummaryRepository;
+
+    @Mock
     private ActivityRepository activityRepository;
+
+    @Mock
     private PersonalRecordRepository personalRecordRepository;
+
+    @Mock
     private AchievementRepository achievementRepository;
-    private ActivitySummaryService service;
+
+    @InjectMocks
+    private ActivitySummaryService activitySummaryService;
+
+    private UUID userId;
 
     @BeforeEach
     void setUp() {
-        activitySummaryRepository = mock(ActivitySummaryRepository.class);
-        activityRepository = mock(ActivityRepository.class);
-        personalRecordRepository = mock(PersonalRecordRepository.class);
-        achievementRepository = mock(AchievementRepository.class);
-        service = new ActivitySummaryService(
-                activitySummaryRepository,
-                activityRepository,
-                personalRecordRepository,
-                achievementRepository
-        );
+        userId = UUID.randomUUID();
     }
 
     @Test
     @DisplayName("Should retry summary save as update when concurrent insert hits unique constraint")
     void shouldRetrySummarySaveAfterConcurrentInsert() {
-        UUID userId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         LocalDate date = LocalDate.of(2025, 10, 8);
         LocalDate weekStart = LocalDate.of(2025, 10, 6);
         LocalDate weekEnd = LocalDate.of(2025, 10, 12);
@@ -62,9 +69,10 @@ class ActivitySummaryServiceTest {
                 .periodEnd(weekEnd)
                 .build();
 
-        //noinspection unchecked
         when(activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
-                userId, ActivitySummary.PeriodType.WEEK, weekStart
+                userId,
+                ActivitySummary.PeriodType.WEEK,
+                weekStart
         )).thenReturn(Optional.empty(), Optional.of(existingSummary));
 
         when(activityRepository.findByUserIdAndStartedAtBetweenOrderByStartedAtDesc(
@@ -81,16 +89,59 @@ class ActivitySummaryServiceTest {
         ));
 
         when(personalRecordRepository.countByUserIdAndDateRange(any(), any(), any())).thenReturn(0L);
-        when(achievementRepository.countByUserIdAndDateRange(any(), any(), any())).thenReturn(0L);
-
+        when(achievementRepository.countByUserIdAndActivityStartedDateRange(any(), any(), any())).thenReturn(0L);
         when(activitySummaryRepository.save(any(ActivitySummary.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate"))
                 .thenReturn(existingSummary);
 
-        service.updateWeeklySummary(userId, date);
+        activitySummaryService.updateWeeklySummary(userId, date);
 
         verify(activitySummaryRepository, times(2))
                 .findByUserIdAndPeriodTypeAndPeriodStart(userId, ActivitySummary.PeriodType.WEEK, weekStart);
         verify(activitySummaryRepository, times(2)).save(any(ActivitySummary.class));
+    }
+
+    @Test
+    @DisplayName("Should count achievements in summaries by triggering activity start date")
+    void shouldCountAchievementsByActivityStartDate() {
+        LocalDate weekDate = LocalDate.of(2025, 12, 3);
+        LocalDate weekStart = LocalDate.of(2025, 12, 1);
+        LocalDateTime startDateTime = weekStart.atStartOfDay();
+        LocalDateTime endDateTime = weekStart.plusDays(7).atStartOfDay();
+
+        Activity activity = Activity.builder()
+                .id(UUID.randomUUID())
+                .userId(userId)
+                .activityType(Activity.ActivityType.RUN)
+                .startedAt(LocalDateTime.of(2025, 12, 3, 23, 30))
+                .endedAt(LocalDateTime.of(2025, 12, 4, 0, 15))
+                .totalDistance(BigDecimal.valueOf(5000))
+                .totalDurationSeconds(2700L)
+                .elevationGain(BigDecimal.valueOf(120))
+                .build();
+
+        when(activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                ActivitySummary.PeriodType.WEEK,
+                weekStart
+        )).thenReturn(Optional.empty());
+        when(activityRepository.findByUserIdAndStartedAtBetweenOrderByStartedAtDesc(
+                userId,
+                startDateTime,
+                endDateTime
+        )).thenReturn(List.of(activity));
+        when(personalRecordRepository.countByUserIdAndDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(achievementRepository.countByUserIdAndActivityStartedDateRange(userId, startDateTime, endDateTime))
+                .thenReturn(1L);
+        when(activitySummaryRepository.save(any(ActivitySummary.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        activitySummaryService.updateWeeklySummary(userId, weekDate);
+
+        verify(achievementRepository).countByUserIdAndActivityStartedDateRange(userId, startDateTime, endDateTime);
+        verify(activitySummaryRepository).save(argThat(summary ->
+                summary.getAchievementsEarned() == 1 &&
+                summary.getActivityCount() == 1
+        ));
     }
 }
