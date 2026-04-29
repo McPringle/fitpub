@@ -77,7 +77,7 @@
                                 </span>
                                 <span id="importFirstSpinner" class="d-none">
                                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                    Importing...
+                                    <span id="importFirstProgressText">Importing...</span>
                                 </span>
                             </button>
                             <button type="button" class="btn btn-outline-danger d-none" id="cancelImportBtn">
@@ -139,6 +139,7 @@
             const importFirstBtn = document.getElementById('importFirstBtn');
             const importFirstText = document.getElementById('importFirstText');
             const importFirstSpinner = document.getElementById('importFirstSpinner');
+            const importFirstProgressText = document.getElementById('importFirstProgressText');
             const cancelImportBtn = document.getElementById('cancelImportBtn');
             let currentActivities = [];
             let importCancellationRequested = false;
@@ -161,6 +162,17 @@
                 importFirstSpinner.classList.toggle('d-none', !loading);
                 cancelImportBtn.classList.toggle('d-none', !loading);
                 cancelImportBtn.disabled = !loading;
+                if (!loading) {
+                    importFirstProgressText.textContent = 'Importing...';
+                }
+            }
+
+            function updateImportProgress(current, total) {
+                if (current == null || total == null || total <= 0) {
+                    importFirstProgressText.textContent = 'Importing...';
+                    return;
+                }
+                importFirstProgressText.textContent = `Importing ${current}/${total}...`;
             }
 
             function showError(message) {
@@ -429,10 +441,12 @@
                     let importedCount = 0;
                     let failedCount = 0;
                     let cancelled = false;
+                    const totalActivitiesToImport = activitiesToImport.length;
 
-                    for (const activity of activitiesToImport) {
+                    for (const [index, activity] of activitiesToImport.entries()) {
                         activity.uiImportStatus = 'importing';
                         activity.uiImportError = null;
+                        updateImportProgress(index + 1, totalActivitiesToImport);
                         renderActivities(currentActivities);
 
                         try {
