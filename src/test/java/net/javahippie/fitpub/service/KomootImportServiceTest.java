@@ -154,15 +154,15 @@ class KomootImportServiceTest {
                 new KomootImportRequest("user@example.com", "secret", "123456", null, null),
                 userId);
 
-        assertThat(response.totalCount()).isEqualTo(2);
-        assertThat(response.activities()).hasSize(2);
-        assertThat(response.activities().get(0).id()).isEqualTo(1001L);
-        assertThat(response.activities().get(0).imported()).isFalse();
-        assertThat(response.activities().get(0).fitPubActivityId()).isNull();
-        assertThat(response.activities().get(0).timeInMotionSeconds()).isEqualTo(7800);
-        assertThat(response.activities().get(1).name()).isEqualTo("Lunch Walk");
-        assertThat(response.activities().get(1).imported()).isTrue();
-        assertThat(response.activities().get(1).fitPubActivityId()).isEqualTo(existingActivityId);
+        assertThat(response.getTotalCount()).isEqualTo(2);
+        assertThat(response.getActivities()).hasSize(2);
+        assertThat(response.getActivities().get(0).getId()).isEqualTo(1001L);
+        assertThat(response.getActivities().get(0).isImported()).isFalse();
+        assertThat(response.getActivities().get(0).getFitPubActivityId()).isNull();
+        assertThat(response.getActivities().get(0).getTimeInMotionSeconds()).isEqualTo(7800);
+        assertThat(response.getActivities().get(1).getName()).isEqualTo("Lunch Walk");
+        assertThat(response.getActivities().get(1).isImported()).isTrue();
+        assertThat(response.getActivities().get(1).getFitPubActivityId()).isEqualTo(existingActivityId);
 
         verify(throttledService).pauseBeforeNextPageRequest();
         server.verify();
@@ -219,11 +219,11 @@ class KomootImportServiceTest {
                 ),
                 userId);
 
-        assertThat(response.totalCount()).isEqualTo(2);
-        assertThat(response.activities()).extracting("id").containsExactly(1002L, 1003L);
-        assertThat(response.activities().get(0).imported()).isFalse();
-        assertThat(response.activities().get(1).imported()).isTrue();
-        assertThat(response.activities().get(1).fitPubActivityId()).isEqualTo(existingActivityId);
+        assertThat(response.getTotalCount()).isEqualTo(2);
+        assertThat(response.getActivities()).extracting("id").containsExactly(1002L, 1003L);
+        assertThat(response.getActivities().get(0).isImported()).isFalse();
+        assertThat(response.getActivities().get(1).isImported()).isTrue();
+        assertThat(response.getActivities().get(1).getFitPubActivityId()).isEqualTo(existingActivityId);
 
         server.verify();
     }
@@ -296,9 +296,9 @@ class KomootImportServiceTest {
                 userId
         );
 
-        assertThat(response.importedActivityId()).isEqualTo(importedActivityId);
-        assertThat(response.importedKomootActivityId()).isEqualTo(2880957035L);
-        assertThat(response.status()).isEqualTo("IMPORTED");
+        assertThat(response.getImportedActivityId()).isEqualTo(importedActivityId);
+        assertThat(response.getImportedKomootActivityId()).isEqualTo(2880957035L);
+        assertThat(response.getStatus()).isEqualTo("IMPORTED");
         assertThat(importedActivity.getKomootActivityId()).isEqualTo(2880957035L);
         assertThat(importedActivity.getTitle()).isEqualTo("Latest Ride");
         assertThat(importedActivity.getDescription()).isEqualTo("Imported from Komoot");
@@ -326,9 +326,9 @@ class KomootImportServiceTest {
                 userId
         );
 
-        assertThat(response.importedActivityId()).isEqualTo(existingActivityId);
-        assertThat(response.importedKomootActivityId()).isEqualTo(3002L);
-        assertThat(response.status()).isEqualTo("SKIPPED_ALREADY_IMPORTED");
+        assertThat(response.getImportedActivityId()).isEqualTo(existingActivityId);
+        assertThat(response.getImportedKomootActivityId()).isEqualTo(3002L);
+        assertThat(response.getStatus()).isEqualTo("SKIPPED_ALREADY_IMPORTED");
     }
 
     @Test
@@ -386,8 +386,8 @@ class KomootImportServiceTest {
                 userId
         );
 
-        assertThat(response.importedActivityId()).isEqualTo(importedActivityId);
-        assertThat(response.status()).isEqualTo("IMPORTED");
+        assertThat(response.getImportedActivityId()).isEqualTo(importedActivityId);
+        assertThat(response.getStatus()).isEqualTo("IMPORTED");
         assertThat(importedActivity.getActivityType()).isEqualTo(Activity.ActivityType.OTHER);
 
         verify(throttledService).pauseBetweenDetailAndGpxRequest();

@@ -43,7 +43,7 @@ public class KomootImportController {
                 .getId();
 
         log.info("User {} requested Komoot activity preview for Komoot ID {}",
-                authentication.getName(), request.userId());
+                authentication.getName(), request.getUserId());
         KomootActivitiesResponse response = komootImportService.fetchCompletedActivities(request, fitPubUserId);
         return ResponseEntity.ok(response);
     }
@@ -58,7 +58,7 @@ public class KomootImportController {
                 .getId();
 
         log.info("User {} requested Komoot import for activity {}",
-                authentication.getName(), request.activityId());
+                authentication.getName(), request.getActivityId());
 
         KomootImportExecutionResponse response = komootImportService.importActivity(
                 request,
