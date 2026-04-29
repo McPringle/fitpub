@@ -48,9 +48,15 @@ public interface ActivityRepository extends JpaRepository<Activity, UUID> {
      * @return list of activities
      */
     List<Activity> findByUserIdAndStartedAtBetweenOrderByStartedAtDesc(
-        UUID userId,
-        LocalDateTime startDate,
-        LocalDateTime endDate
+            UUID userId,
+            LocalDateTime startDate,
+            LocalDateTime endDate
+    );
+
+    boolean existsByUserIdAndStartedAtBetween(
+            UUID userId,
+            LocalDateTime startDate,
+            LocalDateTime endDate
     );
 
     /**

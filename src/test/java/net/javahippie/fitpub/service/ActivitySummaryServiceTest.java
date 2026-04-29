@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -91,5 +93,73 @@ class ActivitySummaryServiceTest {
                 summary.getAchievementsEarned() == 1 &&
                 summary.getActivityCount() == 1
         ));
+    }
+
+    @Test
+    @DisplayName("Should rebuild current month summary on demand when activities exist but summary is missing")
+    void getCurrentMonthSummary_RebuildsMissingSummary() {
+        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDateTime startDateTime = monthStart.atStartOfDay();
+        LocalDateTime endDateTime = monthStart.plusMonths(1).atStartOfDay();
+
+        Activity activity = Activity.builder()
+                .id(UUID.randomUUID())
+                .userId(userId)
+                .activityType(Activity.ActivityType.RUN)
+                .startedAt(startDateTime.plusDays(2).plusHours(7))
+                .endedAt(startDateTime.plusDays(2).plusHours(8))
+                .totalDistance(BigDecimal.valueOf(10000))
+                .totalDurationSeconds(3600L)
+                .elevationGain(BigDecimal.valueOf(150))
+                .build();
+
+        ActivitySummary rebuiltSummary = ActivitySummary.builder()
+                .userId(userId)
+                .periodType(ActivitySummary.PeriodType.MONTH)
+                .periodStart(monthStart)
+                .periodEnd(monthStart.plusMonths(1).minusDays(1))
+                .activityCount(1)
+                .build();
+
+        when(activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                ActivitySummary.PeriodType.MONTH,
+                monthStart
+        )).thenReturn(Optional.empty(), Optional.of(rebuiltSummary));
+        when(activityRepository.existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime))
+                .thenReturn(true);
+        when(activityRepository.findByUserIdAndStartedAtBetweenOrderByStartedAtDesc(userId, startDateTime, endDateTime))
+                .thenReturn(List.of(activity));
+        when(personalRecordRepository.countByUserIdAndDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(achievementRepository.countByUserIdAndActivityStartedDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(activitySummaryRepository.save(org.mockito.ArgumentMatchers.any(ActivitySummary.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ActivitySummary result = activitySummaryService.getCurrentMonthSummary(userId);
+
+        assertNotNull(result);
+        assertEquals(1, result.getActivityCount());
+        verify(activityRepository).existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime);
+    }
+
+    @Test
+    @DisplayName("Should return null for current month summary when no activities exist in the period")
+    void getCurrentMonthSummary_ReturnsNullWhenNoActivitiesExist() {
+        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDateTime startDateTime = monthStart.atStartOfDay();
+        LocalDateTime endDateTime = monthStart.plusMonths(1).atStartOfDay();
+
+        when(activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                ActivitySummary.PeriodType.MONTH,
+                monthStart
+        )).thenReturn(Optional.empty());
+        when(activityRepository.existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime))
+                .thenReturn(false);
+
+        ActivitySummary result = activitySummaryService.getCurrentMonthSummary(userId);
+
+        assertNull(result);
+        verify(activityRepository).existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime);
     }
 }
