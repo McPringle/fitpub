@@ -162,4 +162,116 @@ class ActivitySummaryServiceTest {
         assertNull(result);
         verify(activityRepository).existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime);
     }
+
+    @Test
+    @DisplayName("Should rebuild stale current month summary when activities exist")
+    void getCurrentMonthSummary_RebuildsExistingStaleSummary() {
+        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDateTime startDateTime = monthStart.atStartOfDay();
+        LocalDateTime endDateTime = monthStart.plusMonths(1).atStartOfDay();
+
+        Activity activity = Activity.builder()
+                .id(UUID.randomUUID())
+                .userId(userId)
+                .activityType(Activity.ActivityType.RUN)
+                .startedAt(startDateTime.plusDays(3).plusHours(6))
+                .endedAt(startDateTime.plusDays(3).plusHours(7))
+                .totalDistance(BigDecimal.valueOf(12000))
+                .totalDurationSeconds(4200L)
+                .elevationGain(BigDecimal.valueOf(200))
+                .build();
+
+        ActivitySummary rebuiltSummary = ActivitySummary.builder()
+                .userId(userId)
+                .periodType(ActivitySummary.PeriodType.MONTH)
+                .periodStart(monthStart)
+                .periodEnd(monthStart.plusMonths(1).minusDays(1))
+                .activityCount(1)
+                .build();
+
+        when(activityRepository.existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime))
+                .thenReturn(true);
+        when(activityRepository.findByUserIdAndStartedAtBetweenOrderByStartedAtDesc(userId, startDateTime, endDateTime))
+                .thenReturn(List.of(activity));
+        when(personalRecordRepository.countByUserIdAndDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(achievementRepository.countByUserIdAndActivityStartedDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                ActivitySummary.PeriodType.MONTH,
+                monthStart
+        )).thenReturn(
+                Optional.of(ActivitySummary.builder()
+                        .userId(userId)
+                        .periodType(ActivitySummary.PeriodType.MONTH)
+                        .periodStart(monthStart)
+                        .periodEnd(monthStart.plusMonths(1).minusDays(1))
+                        .activityCount(0)
+                        .build()),
+                Optional.of(rebuiltSummary)
+        );
+        when(activitySummaryRepository.save(org.mockito.ArgumentMatchers.any(ActivitySummary.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ActivitySummary result = activitySummaryService.getCurrentMonthSummary(userId);
+
+        assertNotNull(result);
+        assertEquals(1, result.getActivityCount());
+        verify(activitySummaryRepository).save(org.mockito.ArgumentMatchers.any(ActivitySummary.class));
+    }
+
+    @Test
+    @DisplayName("Should rebuild stale current year summary when activities exist")
+    void getCurrentYearSummary_RebuildsExistingStaleSummary() {
+        LocalDate yearStart = LocalDate.now().withDayOfYear(1);
+        LocalDateTime startDateTime = yearStart.atStartOfDay();
+        LocalDateTime endDateTime = yearStart.plusYears(1).atStartOfDay();
+
+        Activity activity = Activity.builder()
+                .id(UUID.randomUUID())
+                .userId(userId)
+                .activityType(Activity.ActivityType.RIDE)
+                .startedAt(startDateTime.plusDays(20).plusHours(9))
+                .endedAt(startDateTime.plusDays(20).plusHours(11))
+                .totalDistance(BigDecimal.valueOf(65000))
+                .totalDurationSeconds(7200L)
+                .elevationGain(BigDecimal.valueOf(900))
+                .build();
+
+        ActivitySummary rebuiltSummary = ActivitySummary.builder()
+                .userId(userId)
+                .periodType(ActivitySummary.PeriodType.YEAR)
+                .periodStart(yearStart)
+                .periodEnd(yearStart.plusYears(1).minusDays(1))
+                .activityCount(1)
+                .build();
+
+        when(activityRepository.existsByUserIdAndStartedAtBetween(userId, startDateTime, endDateTime))
+                .thenReturn(true);
+        when(activityRepository.findByUserIdAndStartedAtBetweenOrderByStartedAtDesc(userId, startDateTime, endDateTime))
+                .thenReturn(List.of(activity));
+        when(personalRecordRepository.countByUserIdAndDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(achievementRepository.countByUserIdAndActivityStartedDateRange(userId, startDateTime, endDateTime)).thenReturn(0L);
+        when(activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                ActivitySummary.PeriodType.YEAR,
+                yearStart
+        )).thenReturn(
+                Optional.of(ActivitySummary.builder()
+                        .userId(userId)
+                        .periodType(ActivitySummary.PeriodType.YEAR)
+                        .periodStart(yearStart)
+                        .periodEnd(yearStart.plusYears(1).minusDays(1))
+                        .activityCount(0)
+                        .build()),
+                Optional.of(rebuiltSummary)
+        );
+        when(activitySummaryRepository.save(org.mockito.ArgumentMatchers.any(ActivitySummary.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ActivitySummary result = activitySummaryService.getCurrentYearSummary(userId);
+
+        assertNotNull(result);
+        assertEquals(1, result.getActivityCount());
+        verify(activitySummaryRepository).save(org.mockito.ArgumentMatchers.any(ActivitySummary.class));
+    }
 }

@@ -258,6 +258,22 @@ public class ActivitySummaryService {
         );
     }
 
+    /**
+     * Get current year summary.
+     */
+    @Transactional
+    public ActivitySummary getCurrentYearSummary(UUID userId) {
+        LocalDate yearStart = LocalDate.now().with(TemporalAdjusters.firstDayOfYear());
+        LocalDate yearEndExclusive = yearStart.plusYears(1);
+        return getOrBuildCurrentSummary(
+                userId,
+                ActivitySummary.PeriodType.YEAR,
+                yearStart,
+                yearEndExclusive,
+                () -> updateYearlySummary(userId, yearStart)
+        );
+    }
+
     private ActivitySummary getOrBuildCurrentSummary(
             UUID userId,
             ActivitySummary.PeriodType periodType,
@@ -265,16 +281,6 @@ public class ActivitySummaryService {
             LocalDate periodEndExclusive,
             Runnable rebuildAction
     ) {
-        ActivitySummary existingSummary = activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
-                userId,
-                periodType,
-                periodStart
-        ).orElse(null);
-
-        if (existingSummary != null) {
-            return existingSummary;
-        }
-
         boolean hasActivitiesInPeriod = activityRepository.existsByUserIdAndStartedAtBetween(
                 userId,
                 periodStart.atStartOfDay(),
@@ -282,7 +288,11 @@ public class ActivitySummaryService {
         );
 
         if (!hasActivitiesInPeriod) {
-            return null;
+            return activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                    userId,
+                    periodType,
+                    periodStart
+            ).orElse(null);
         }
 
         rebuildAction.run();
