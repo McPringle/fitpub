@@ -285,6 +285,23 @@ public class AnalyticsController {
     }
 
     /**
+     * Get current year summary.
+     */
+    @GetMapping("/summaries/current-year")
+    public ResponseEntity<ActivitySummary> getCurrentYearSummary(
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        UUID userId = getUserId(userDetails);
+        ActivitySummary summary = activitySummaryService.getCurrentYearSummary(userId);
+
+        if (summary == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(summary);
+    }
+
+    /**
      * Get form status description.
      */
     private String getFormStatusDescription(TrainingLoad.FormStatus status) {
