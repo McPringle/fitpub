@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.model.entity.ActivityMetrics;
 import net.javahippie.fitpub.model.entity.PersonalRecord;
+import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.PersonalRecordRepository;
 
 import java.math.BigDecimal;
@@ -32,6 +33,9 @@ class PersonalRecordServiceTest {
 
     @Mock
     private PersonalRecordRepository personalRecordRepository;
+
+    @Mock
+    private ActivityRepository activityRepository;
 
     @InjectMocks
     private PersonalRecordService personalRecordService;
@@ -413,6 +417,37 @@ class PersonalRecordServiceTest {
         assertTrue(records.stream().anyMatch(r ->
             r.getRecordType() == PersonalRecord.RecordType.HIGHEST_ELEVATION_GAIN
         ));
+    }
+
+    @Test
+    @DisplayName("Should rebuild personal records from remaining activities")
+    void testRebuildPersonalRecordsForUser() {
+        Activity firstActivity = createActivity(
+                10000L,
+                3600L,
+                BigDecimal.valueOf(100)
+        );
+        firstActivity.setStartedAt(testTime.minusDays(2));
+
+        Activity secondActivity = createActivity(
+                15000L,
+                4500L,
+                BigDecimal.valueOf(200)
+        );
+        secondActivity.setStartedAt(testTime.minusDays(1));
+
+        when(activityRepository.findByUserIdOrderByStartedAtAsc(userId))
+                .thenReturn(List.of(firstActivity, secondActivity));
+        when(personalRecordRepository.findByUserIdAndActivityTypeAndRecordType(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(personalRecordRepository.save(any(PersonalRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        personalRecordService.rebuildPersonalRecordsForUser(userId);
+
+        verify(personalRecordRepository).deleteByUserId(userId);
+        verify(activityRepository).findByUserIdOrderByStartedAtAsc(userId);
+        verify(personalRecordRepository, atLeastOnce()).save(any(PersonalRecord.class));
     }
 
     // Helper methods

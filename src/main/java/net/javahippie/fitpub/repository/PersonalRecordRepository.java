@@ -36,6 +36,11 @@ public interface PersonalRecordRepository extends JpaRepository<PersonalRecord, 
     );
 
     /**
+     * Delete all personal records for a user.
+     */
+    void deleteByUserId(UUID userId);
+
+    /**
      * Get count of personal records set by a user.
      */
     @Query("SELECT COUNT(pr) FROM PersonalRecord pr WHERE pr.userId = :userId")
