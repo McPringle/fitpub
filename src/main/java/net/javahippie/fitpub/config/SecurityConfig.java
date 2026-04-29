@@ -87,6 +87,7 @@ public class SecurityConfig {
 
                 // Protected view pages - require authentication
                 .requestMatchers("/activities", "/activities/upload").authenticated()
+                .requestMatchers("/komoot-import").authenticated()
                 .requestMatchers("/profile", "/profile/**", "/settings").authenticated()
                 .requestMatchers("/notifications").authenticated()
                 .requestMatchers("/analytics", "/analytics/**").authenticated()
@@ -149,6 +150,7 @@ public class SecurityConfig {
 
                 // Protected endpoints - Batch Import API
                 .requestMatchers("/api/batch-import/**").authenticated()
+                .requestMatchers("/api/komoot-import/**").authenticated()
 
                 // Protected endpoints - Privacy Zones API
                 .requestMatchers("/api/privacy-zones/**").authenticated()

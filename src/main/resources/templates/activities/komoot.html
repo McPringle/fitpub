@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}">
+
+<head>
+    <title>Komoot Import</title>
+</head>
+
+<body>
+<div layout:fragment="content">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h2 class="mb-4">
+                <i class="bi bi-signpost-split text-success"></i>
+                Komoot Import
+            </h2>
+
+            <div class="alert alert-secondary">
+                <div class="fw-semibold mb-1">Important</div>
+                <div class="small mb-1">
+                    Your Komoot credentials are only used for this request and are not stored in FitPub.
+                </div>
+                <div class="small mb-0">
+                    The import currently runs in this browser tab. If you leave or reload the page, remaining activities will not continue importing automatically.
+                </div>
+            </div>
+
+            <ul class="small text-muted ps-3 mb-4">
+                <li>Import starts with the oldest new activities, so progress begins at the bottom of the list.</li>
+                <li>FitPub adds short delays between Komoot requests during loading and import to reduce rate limiting.</li>
+                <li>This integration depends on Komoot web endpoints and may stop working if Komoot changes them.</li>
+            </ul>
+
+            <div id="errorAlert" class="alert alert-danger d-none" role="alert"></div>
+
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <form id="komootImportForm">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="email" class="form-label">Komoot Email</label>
+                                <input type="email" class="form-control" id="email" name="email" required autocomplete="username">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="password" class="form-label">Komoot Password</label>
+                                <input type="password" class="form-control" id="password" name="password" required autocomplete="current-password">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="userId" class="form-label">Komoot ID</label>
+                                <input type="text" class="form-control" id="userId" name="userId" required inputmode="numeric" pattern="[0-9]+">
+                                <div class="form-text">You can find the Komoot ID in your Komoot account settings.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="startDate" class="form-label">Start Date</label>
+                                        <input type="date" class="form-control" id="startDate" name="startDate">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="endDate" class="form-label">End Date</label>
+                                        <input type="date" class="form-control" id="endDate" name="endDate">
+                                    </div>
+                                </div>
+                                <div class="form-text">Both dates must be set together. Inclusive, day-based filter.</div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 d-flex justify-content-end gap-2 flex-wrap">
+                            <button type="submit" class="btn btn-primary" id="loadActivitiesBtn">
+                                <i class="bi bi-arrow-repeat"></i> Load Komoot Activities
+                            </button>
+                            <button type="button" class="btn btn-success" id="importFirstBtn" disabled>
+                                <span id="importFirstText">
+                                    <i class="bi bi-download"></i> Import Listed Activities
+                                </span>
+                                <span id="importFirstSpinner" class="d-none">
+                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                    Importing...
+                                </span>
+                            </button>
+                            <button type="button" class="btn btn-outline-danger d-none" id="cancelImportBtn">
+                                <i class="bi bi-stop-circle"></i> Stop After Current Activity
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div id="loadingIndicator" class="text-center py-5 d-none">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted mb-0">Loading Komoot activities...</p>
+            </div>
+
+            <div id="resultsSection" class="mt-4 d-none">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 class="mb-0">
+                        <i class="bi bi-list-check"></i>
+                        Komoot Activities
+                    </h4>
+                    <span class="badge text-bg-secondary" id="resultCount">0</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Distance</th>
+                            <th>Duration</th>
+                            <th>Elevation</th>
+                            <th class="text-center">Status</th>
+                        </tr>
+                        </thead>
+                        <tbody id="resultsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="scripts">
+    <script th:inline="javascript">
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('komootImportForm');
+            const errorAlert = document.getElementById('errorAlert');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const resultsSection = document.getElementById('resultsSection');
+            const resultsBody = document.getElementById('resultsBody');
+            const resultCount = document.getElementById('resultCount');
+            const loadActivitiesBtn = document.getElementById('loadActivitiesBtn');
+            const importFirstBtn = document.getElementById('importFirstBtn');
+            const importFirstText = document.getElementById('importFirstText');
+            const importFirstSpinner = document.getElementById('importFirstSpinner');
+            const cancelImportBtn = document.getElementById('cancelImportBtn');
+            let currentActivities = [];
+            let importCancellationRequested = false;
+            let importInProgress = false;
+
+            function updateImportButtonState() {
+                importFirstBtn.disabled = importInProgress || currentActivities.length === 0;
+            }
+
+            function setLoading(loading) {
+                loadActivitiesBtn.disabled = loading;
+                loadingIndicator.classList.toggle('d-none', !loading);
+            }
+
+            function setImportLoading(loading) {
+                importInProgress = loading;
+                loadActivitiesBtn.disabled = loading;
+                updateImportButtonState();
+                importFirstText.classList.toggle('d-none', loading);
+                importFirstSpinner.classList.toggle('d-none', !loading);
+                cancelImportBtn.classList.toggle('d-none', !loading);
+                cancelImportBtn.disabled = !loading;
+            }
+
+            function showError(message) {
+                errorAlert.textContent = message;
+                errorAlert.classList.remove('d-none');
+            }
+
+            function clearError() {
+                errorAlert.textContent = '';
+                errorAlert.classList.add('d-none');
+            }
+
+            function showStatus(message) {
+                errorAlert.textContent = message;
+                errorAlert.classList.remove('d-none');
+                errorAlert.classList.remove('alert-danger');
+                errorAlert.classList.add('alert-info');
+            }
+
+            function resetAlertToError() {
+                errorAlert.classList.remove('alert-info');
+                errorAlert.classList.add('alert-danger');
+            }
+
+            function formatDistance(meters) {
+                if (meters == null) {
+                    return '-';
+                }
+                return (meters / 1000).toFixed(1) + ' km';
+            }
+
+            function formatDuration(seconds) {
+                if (seconds == null) {
+                    return '-';
+                }
+
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const remainingSeconds = seconds % 60;
+                return [hours, minutes, remainingSeconds]
+                    .map((value, index) => index === 0 ? String(value) : String(value).padStart(2, '0'))
+                    .join(':');
+            }
+
+            function formatElevation(elevationUp) {
+                if (elevationUp == null) {
+                    return '-';
+                }
+                return Math.round(elevationUp) + ' m';
+            }
+
+            function formatDate(value) {
+                if (!value) {
+                    return '-';
+                }
+                return new Intl.DateTimeFormat(undefined, {
+                    dateStyle: 'medium',
+                    timeStyle: 'short'
+                }).format(new Date(value));
+            }
+
+            function escapeHtml(value) {
+                return String(value)
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;')
+                    .replaceAll("'", '&#39;');
+            }
+
+            function formatActivityTypeBadge(activityType) {
+                const normalizedType = String(activityType).toLowerCase().replaceAll('_', '-');
+                return `<span class="activity-type-badge activity-type-${escapeHtml(normalizedType)}">${escapeHtml(activityType)}</span>`;
+            }
+
+            function renderActivityTitle(activity) {
+                const title = escapeHtml(activity.name || 'Untitled activity');
+                if (activity.fitPubActivityId) {
+                    return `<a href="/activities/${encodeURIComponent(activity.fitPubActivityId)}" class="fw-semibold text-decoration-none">${title}</a>`;
+                }
+                return `<div class="fw-semibold">${title}</div>`;
+            }
+
+            function renderImportStatus(activity) {
+                if (activity.uiImportStatus === 'queued') {
+                    return '<i class="bi bi-hourglass-split text-warning" title="Queued for import" aria-label="Queued for import"></i>';
+                }
+
+                if (activity.uiImportStatus === 'importing') {
+                    return '<span class="spinner-border spinner-border-sm text-primary" role="status" aria-label="Importing"></span>';
+                }
+
+                if (activity.uiImportStatus === 'error') {
+                    const title = escapeHtml(activity.uiImportError || 'Import failed');
+                    return `<i class="bi bi-exclamation-circle-fill text-danger" title="${title}" aria-label="${title}"></i>`;
+                }
+
+                if (activity.imported) {
+                    return '<i class="bi bi-check-circle-fill text-success" title="Already imported" aria-label="Already imported"></i>';
+                }
+
+                return '<i class="bi bi-plus-circle text-muted" title="New activity" aria-label="New activity"></i>';
+            }
+
+            function renderActivities(activities) {
+                resultCount.textContent = activities.length;
+
+                if (activities.length === 0) {
+                    resultsBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No completed activities found.</td></tr>';
+                    resultsSection.classList.remove('d-none');
+                    return;
+                }
+
+                resultsBody.innerHTML = activities.map(activity => `
+                    <tr>
+                        <td>${renderActivityTitle(activity)}</td>
+                        <td>${formatDate(activity.date)}</td>
+                        <td>${formatActivityTypeBadge(activity.mappedActivityType)}</td>
+                        <td>${formatDistance(activity.distanceMeters)}</td>
+                        <td>${formatDuration(activity.timeInMotionSeconds || activity.durationSeconds)}</td>
+                        <td>${formatElevation(activity.elevationUp)}</td>
+                        <td class="text-center">${renderImportStatus(activity)}</td>
+                    </tr>
+                `).join('');
+
+                resultsSection.classList.remove('d-none');
+            }
+
+            function buildPayload() {
+                const formData = new FormData(form);
+                const startDate = formData.get('startDate');
+                const endDate = formData.get('endDate');
+                return {
+                    email: formData.get('email'),
+                    password: formData.get('password'),
+                    userId: formData.get('userId'),
+                    startDate: startDate || null,
+                    endDate: endDate || null
+                };
+            }
+
+            function buildImportPayload(activityId) {
+                const payload = buildPayload();
+                return {
+                    email: payload.email,
+                    password: payload.password,
+                    userId: payload.userId,
+                    activityId: activityId
+                };
+            }
+
+            function hasIncompleteDateRange(payload) {
+                return Boolean(payload.startDate) !== Boolean(payload.endDate);
+            }
+
+            function resetQueuedActivities() {
+                for (const activity of currentActivities) {
+                    if (activity.uiImportStatus === 'queued') {
+                        activity.uiImportStatus = null;
+                        activity.uiImportError = null;
+                    }
+                }
+            }
+
+            form.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                clearError();
+                resetAlertToError();
+                resultsSection.classList.add('d-none');
+
+                const payload = buildPayload();
+                if (hasIncompleteDateRange(payload)) {
+                    showError('Start date and end date must either both be set or both be empty.');
+                    return;
+                }
+
+                setLoading(true);
+                currentActivities = [];
+                updateImportButtonState();
+
+                try {
+                    const response = await FitPubAuth.authenticatedFetch('/api/komoot-import/activities', {
+                        method: 'POST',
+                        body: payload
+                    });
+
+                    if (!response.ok) {
+                        let message = 'Failed to load Komoot activities.';
+                        try {
+                            const body = await response.json();
+                            message = body.error || message;
+                        } catch (ignored) {
+                            // Ignore parse errors and show the generic message.
+                        }
+                        throw new Error(message);
+                    }
+
+                    const data = await response.json();
+                    currentActivities = (data.activities || []).map(activity => ({
+                        ...activity,
+                        uiImportStatus: null,
+                        uiImportError: null
+                    }));
+                    updateImportButtonState();
+                    renderActivities(currentActivities);
+                } catch (error) {
+                    let message = error instanceof Error ? error.message : 'Failed to load Komoot activities.';
+
+                    if (error instanceof Error && error.message === 'Authentication failed') {
+                        return;
+                    }
+
+                    showError(message);
+                } finally {
+                    setLoading(false);
+                }
+            });
+
+            importFirstBtn.addEventListener('click', async function() {
+                clearError();
+                resetAlertToError();
+
+                const payload = buildPayload();
+                if (hasIncompleteDateRange(payload)) {
+                    showError('Start date and end date must either both be set or both be empty.');
+                    return;
+                }
+                if (currentActivities.length === 0) {
+                    showError('Load Komoot activities before starting the import.');
+                    return;
+                }
+                importCancellationRequested = false;
+                setImportLoading(true);
+
+                try {
+                    const activitiesToImport = currentActivities
+                        .filter(activity => !activity.imported)
+                        .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
+
+                    if (activitiesToImport.length === 0) {
+                        showStatus('All listed Komoot activities are already imported.');
+                        return;
+                    }
+
+                    for (const activity of activitiesToImport) {
+                        activity.uiImportStatus = 'queued';
+                        activity.uiImportError = null;
+                    }
+                    renderActivities(currentActivities);
+
+                    let importedCount = 0;
+                    let failedCount = 0;
+                    let cancelled = false;
+
+                    for (const activity of activitiesToImport) {
+                        activity.uiImportStatus = 'importing';
+                        activity.uiImportError = null;
+                        renderActivities(currentActivities);
+
+                        try {
+                            const response = await FitPubAuth.authenticatedFetch('/api/komoot-import/activities/import', {
+                                method: 'POST',
+                                body: buildImportPayload(activity.id)
+                            });
+
+                            if (!response.ok) {
+                                let message = 'Failed to import Komoot activity.';
+                                try {
+                                    const body = await response.json();
+                                    message = body.error || message;
+                                } catch (ignored) {
+                                    // Ignore parse errors and show the generic message.
+                                }
+                                throw new Error(message);
+                            }
+
+                            const data = await response.json();
+                            activity.imported = data.status === 'IMPORTED' || data.status === 'SKIPPED_ALREADY_IMPORTED';
+                            activity.fitPubActivityId = data.importedActivityId || activity.fitPubActivityId;
+                            activity.uiImportStatus = activity.imported ? 'imported' : null;
+                            activity.uiImportError = null;
+                            if (data.status === 'IMPORTED') {
+                                importedCount += 1;
+                            }
+                        } catch (error) {
+                            failedCount += 1;
+                            activity.uiImportStatus = 'error';
+                            activity.uiImportError = error instanceof Error ? error.message : 'Failed to import Komoot activity.';
+                        }
+
+                        renderActivities(currentActivities);
+
+                        if (importCancellationRequested) {
+                            cancelled = true;
+                            resetQueuedActivities();
+                            renderActivities(currentActivities);
+                            break;
+                        }
+                    }
+
+                    if (cancelled) {
+                        showStatus(`Import stopped after the current activity. Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
+                    } else {
+                        showStatus(`Imported ${importedCount} Komoot activit${importedCount === 1 ? 'y' : 'ies'}${failedCount > 0 ? `, ${failedCount} failed` : ''}.`);
+                    }
+                } catch (error) {
+                    let message = error instanceof Error ? error.message : 'Failed to import Komoot activities.';
+
+                    if (error instanceof Error && error.message === 'Authentication failed') {
+                        return;
+                    }
+
+                    showError(message);
+                } finally {
+                    setImportLoading(false);
+                    importCancellationRequested = false;
+                }
+            });
+
+            cancelImportBtn.addEventListener('click', function() {
+                importCancellationRequested = true;
+                cancelImportBtn.disabled = true;
+                showStatus('Import will stop after the current activity finishes.');
+            });
+
+            updateImportButtonState();
+        });
+    </script>
+</th:block>
+</body>
+</html>

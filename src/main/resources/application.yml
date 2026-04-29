@@ -104,6 +104,12 @@ fitpub:
     enabled: ${WEATHER_ENABLED:false}
     api-key: ${OPENWEATHERMAP_API_KEY:}
 
+  komoot:
+    base-url: ${KOMOOT_BASE_URL:https://www.komoot.com}
+    paginated-request-delay-ms: ${KOMOOT_PAGINATED_REQUEST_DELAY_MS:1000}
+    detail-to-gpx-delay-ms: ${KOMOOT_DETAIL_TO_GPX_DELAY_MS:500}
+    activity-import-delay-ms: ${KOMOOT_ACTIVITY_IMPORT_DELAY_MS:3000}
+
 # Logging configuration
 logging:
   level:
