@@ -320,6 +320,12 @@ public class FitFileService {
             .map(activity -> {
                 activityRepository.delete(activity);
                 achievementService.rebuildAchievementsForUser(userId);
+                if (activity.getStartedAt() != null) {
+                    java.time.LocalDate activityDate = activity.getStartedAt().toLocalDate();
+                    activitySummaryService.updateWeeklySummary(userId, activityDate);
+                    activitySummaryService.updateMonthlySummary(userId, activityDate);
+                    activitySummaryService.updateYearlySummary(userId, activityDate);
+                }
                 log.info("Deleted activity {} for user {}", activityId, userId);
                 return true;
             })

@@ -224,9 +224,11 @@ class FitFileServiceTest {
     void testDeleteActivity() {
         // Arrange
         UUID activityId = UUID.randomUUID();
+        LocalDateTime startedAt = LocalDateTime.of(2025, 12, 3, 10, 0);
         Activity activity = Activity.builder()
             .id(activityId)
             .userId(testUserId)
+            .startedAt(startedAt)
             .build();
 
         when(activityRepository.findByIdAndUserId(activityId, testUserId))
@@ -239,6 +241,9 @@ class FitFileServiceTest {
         assertTrue(result);
         verify(activityRepository).delete(activity);
         verify(achievementService).rebuildAchievementsForUser(testUserId);
+        verify(activitySummaryService).updateWeeklySummary(testUserId, startedAt.toLocalDate());
+        verify(activitySummaryService).updateMonthlySummary(testUserId, startedAt.toLocalDate());
+        verify(activitySummaryService).updateYearlySummary(testUserId, startedAt.toLocalDate());
     }
 
     @Test
@@ -256,6 +261,9 @@ class FitFileServiceTest {
         assertFalse(result);
         verify(activityRepository, never()).delete(any());
         verify(achievementService, never()).rebuildAchievementsForUser(any());
+        verify(activitySummaryService, never()).updateWeeklySummary(any(), any());
+        verify(activitySummaryService, never()).updateMonthlySummary(any(), any());
+        verify(activitySummaryService, never()).updateYearlySummary(any(), any());
     }
 
     @Test
