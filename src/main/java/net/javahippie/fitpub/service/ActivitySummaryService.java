@@ -239,26 +239,67 @@ public class ActivitySummaryService {
     /**
      * Get current week summary.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public ActivitySummary getCurrentWeekSummary(UUID userId) {
         LocalDate weekStart = LocalDate.now().with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
-        return activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+        LocalDate weekEndExclusive = weekStart.plusDays(7);
+        return getOrBuildCurrentSummary(
                 userId,
                 ActivitySummary.PeriodType.WEEK,
-                weekStart
-        ).orElse(null);
+                weekStart,
+                weekEndExclusive,
+                () -> updateWeeklySummary(userId, weekStart)
+        );
     }
 
     /**
      * Get current month summary.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public ActivitySummary getCurrentMonthSummary(UUID userId) {
         LocalDate monthStart = LocalDate.now().with(TemporalAdjusters.firstDayOfMonth());
-        return activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+        LocalDate monthEndExclusive = monthStart.plusMonths(1);
+        return getOrBuildCurrentSummary(
                 userId,
                 ActivitySummary.PeriodType.MONTH,
-                monthStart
+                monthStart,
+                monthEndExclusive,
+                () -> updateMonthlySummary(userId, monthStart)
+        );
+    }
+
+    private ActivitySummary getOrBuildCurrentSummary(
+            UUID userId,
+            ActivitySummary.PeriodType periodType,
+            LocalDate periodStart,
+            LocalDate periodEndExclusive,
+            Runnable rebuildAction
+    ) {
+        ActivitySummary existingSummary = activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                periodType,
+                periodStart
+        ).orElse(null);
+
+        if (existingSummary != null) {
+            return existingSummary;
+        }
+
+        boolean hasActivitiesInPeriod = activityRepository.existsByUserIdAndStartedAtBetween(
+                userId,
+                periodStart.atStartOfDay(),
+                periodEndExclusive.atStartOfDay()
+        );
+
+        if (!hasActivitiesInPeriod) {
+            return null;
+        }
+
+        rebuildAction.run();
+        return activitySummaryRepository.findByUserIdAndPeriodTypeAndPeriodStart(
+                userId,
+                periodType,
+                periodStart
         ).orElse(null);
     }
 }
