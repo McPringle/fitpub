@@ -108,6 +108,7 @@
                     <table class="table table-hover align-middle">
                         <thead>
                         <tr>
+                            <th class="text-center" style="width: 1%;"></th>
                             <th>Name</th>
                             <th>Date</th>
                             <th>Type</th>
@@ -264,17 +265,32 @@
                 return '<i class="bi bi-plus-circle text-muted" title="New activity" aria-label="New activity"></i>';
             }
 
+            function renderVisibilityIcon(activity) {
+                const status = String(activity.status || '').toLowerCase();
+
+                if (status === 'public') {
+                    return '<i class="bi bi-globe2 visibility-public" title="Public" aria-label="Public"></i>';
+                }
+
+                if (status === 'friends' || status === 'followers' || status === 'close_friends') {
+                    return '<i class="bi bi-people-fill visibility-followers" title="Followers" aria-label="Followers"></i>';
+                }
+
+                return '<i class="bi bi-lock-fill visibility-private" title="Private" aria-label="Private"></i>';
+            }
+
             function renderActivities(activities) {
                 resultCount.textContent = activities.length;
 
                 if (activities.length === 0) {
-                    resultsBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No completed activities found.</td></tr>';
+                    resultsBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No completed activities found.</td></tr>';
                     resultsSection.classList.remove('d-none');
                     return;
                 }
 
                 resultsBody.innerHTML = activities.map(activity => `
                     <tr>
+                        <td class="text-center">${renderVisibilityIcon(activity)}</td>
                         <td>${renderActivityTitle(activity)}</td>
                         <td>${formatDate(activity.date)}</td>
                         <td>${formatActivityTypeBadge(activity.mappedActivityType)}</td>
