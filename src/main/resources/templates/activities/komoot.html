@@ -56,11 +56,11 @@
                                 <div class="row g-3">
                                     <div class="col-md-6">
                                         <label for="startDate" class="form-label">Start Date</label>
-                                        <input type="date" class="form-control" id="startDate" name="startDate">
+                                        <input type="date" class="form-control" id="startDate" name="startDate" th:value="${defaultStartDate}">
                                     </div>
                                     <div class="col-md-6">
                                         <label for="endDate" class="form-label">End Date</label>
-                                        <input type="date" class="form-control" id="endDate" name="endDate">
+                                        <input type="date" class="form-control" id="endDate" name="endDate" th:value="${defaultEndDate}">
                                     </div>
                                 </div>
                                 <div class="form-text">Both dates must be set together. Inclusive, day-based filter.</div>
