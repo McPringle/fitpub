@@ -172,7 +172,7 @@ public class ActivitySummaryService {
                 startDateTime,
                 endDateTime
         );
-        long achievementsEarned = achievementRepository.countByUserIdAndDateRange(
+        long achievementsEarned = achievementRepository.countByUserIdAndActivityStartedDateRange(
                 userId,
                 startDateTime,
                 endDateTime

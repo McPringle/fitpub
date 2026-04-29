@@ -61,6 +61,23 @@ public interface AchievementRepository extends JpaRepository<Achievement, UUID> 
     );
 
     /**
+     * Count achievements whose triggering activity started within a date range.
+     */
+    @Query(value = """
+            SELECT COUNT(*)
+            FROM achievements ach
+            JOIN activities act ON act.id = ach.activity_id
+            WHERE ach.user_id = :userId
+              AND act.started_at >= :startDate
+              AND act.started_at < :endDate
+            """, nativeQuery = true)
+    long countByUserIdAndActivityStartedDateRange(
+            @Param("userId") UUID userId,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
      * Find recent achievements for a user.
      */
     @Query("SELECT a FROM Achievement a " +
