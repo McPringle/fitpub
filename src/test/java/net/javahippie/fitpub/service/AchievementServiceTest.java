@@ -14,14 +14,14 @@ import net.javahippie.fitpub.repository.AchievementRepository;
 import net.javahippie.fitpub.repository.ActivityRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -54,14 +54,7 @@ class AchievementServiceTest {
     void testCheckAndAwardAchievements_FirstActivity() {
         // Given
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
-
-        when(activityRepository.countByUserId(userId)).thenReturn(1L);
-        when(activityRepository.countByUserIdAndActivityType(userId, Activity.ActivityType.RUN)).thenReturn(1L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(5000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
-        // Streak source: today has one activity (1-day streak — not enough to trigger any streak achievement)
-        lenient().when(activityRepository.findActivityStartTimestampsSince(any(), any()))
-            .thenReturn(List.of(java.time.LocalDateTime.now()));
+        stubHistory(activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -82,12 +75,11 @@ class AchievementServiceTest {
     @DisplayName("Should award first run achievement")
     void testCheckAndAwardAchievements_FirstRun() {
         // Given
+        Activity firstRide = createActivity(Activity.ActivityType.RIDE, 10000L, BigDecimal.ZERO);
+        firstRide.setStartedAt(testTime.minusDays(1));
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(10L); // Not first overall
-        when(activityRepository.countByUserIdAndActivityType(userId, Activity.ActivityType.RUN)).thenReturn(1L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(50000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(2L);
+        stubHistory(firstRide, activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -102,13 +94,12 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award distance milestone achievements")
     void testCheckAndAwardAchievements_DistanceMilestone() {
-        // Given - User has completed 10+ km total
+        // Given - Current activity crosses 10 km total
+        Activity previous = createActivity(Activity.ActivityType.RUN, 7000L, BigDecimal.ZERO);
+        previous.setStartedAt(testTime.minusDays(1));
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(5L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(3L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(12000)); // 12 km
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
+        stubHistory(previous, activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -126,13 +117,17 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award activity count milestone")
     void testCheckAndAwardAchievements_ActivityCount() {
-        // Given - User has 10 activities
+        // Given - Current activity is the 10th activity
+        List<Activity> history = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            Activity previous = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+            previous.setStartedAt(testTime.minusDays(10 - i));
+            history.add(previous);
+        }
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+        history.add(activity);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(10L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(5L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(50000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
+        stubHistory(history);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -147,15 +142,18 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award early bird achievement")
     void testCheckAndAwardAchievements_EarlyBird() {
-        // Given - Activity before 6am, and user has 5+ early activities
+        // Given - Activity before 6am is the 5th early activity
+        List<Activity> history = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            Activity previous = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+            previous.setStartedAt(LocalDateTime.of(2025, 11, 20 + i, 5, 30));
+            history.add(previous);
+        }
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
         activity.setStartedAt(LocalDateTime.of(2025, 12, 1, 5, 30)); // 5:30 AM
 
-        when(activityRepository.countByUserId(userId)).thenReturn(10L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(5L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(50000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
-        when(activityRepository.countByUserIdAndStartTimeBefore(eq(userId), eq(LocalTime.of(6, 0)))).thenReturn(5L);
+        history.add(activity);
+        stubHistory(history);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -170,15 +168,18 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award night owl achievement")
     void testCheckAndAwardAchievements_NightOwl() {
-        // Given - Activity after 10pm, and user has 5+ late activities
+        // Given - Activity after 10pm is the 5th late activity
+        List<Activity> history = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            Activity previous = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+            previous.setStartedAt(LocalDateTime.of(2025, 11, 20 + i, 23, 0));
+            history.add(previous);
+        }
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
         activity.setStartedAt(LocalDateTime.of(2025, 12, 1, 23, 0)); // 11:00 PM
 
-        when(activityRepository.countByUserId(userId)).thenReturn(10L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(5L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(50000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
-        when(activityRepository.countByUserIdAndStartTimeAfter(eq(userId), eq(LocalTime.of(22, 0)))).thenReturn(5L);
+        history.add(activity);
+        stubHistory(history);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -196,11 +197,7 @@ class AchievementServiceTest {
         // Given - Activity with 1000m+ elevation gain
         Activity activity = createActivity(Activity.ActivityType.HIKE, 10000L, BigDecimal.valueOf(1200));
 
-        when(activityRepository.countByUserId(userId)).thenReturn(5L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(3L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(50000));
-        when(activityRepository.sumElevationGainByUserId(userId)).thenReturn(BigDecimal.valueOf(1200));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
+        stubHistory(activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -215,14 +212,12 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award total elevation milestones")
     void testCheckAndAwardAchievements_TotalElevation() {
-        // Given - User has 5000m+ total elevation
+        // Given - Current activity crosses 5000m total elevation
+        Activity previous = createActivity(Activity.ActivityType.HIKE, 10000L, BigDecimal.valueOf(4500));
+        previous.setStartedAt(testTime.minusDays(1));
         Activity activity = createActivity(Activity.ActivityType.HIKE, 10000L, BigDecimal.valueOf(500));
 
-        when(activityRepository.countByUserId(userId)).thenReturn(20L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(10L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(200000));
-        when(activityRepository.sumElevationGainByUserId(userId)).thenReturn(BigDecimal.valueOf(6000)); // 6000m total
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(2L);
+        stubHistory(previous, activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -240,13 +235,14 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award variety seeker achievement")
     void testCheckAndAwardAchievements_VarietySeeker() {
-        // Given - User has tried 3+ different activity types
+        // Given - Current activity introduces the 3rd distinct activity type
+        Activity run = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+        run.setStartedAt(testTime.minusDays(2));
+        Activity ride = createActivity(Activity.ActivityType.RIDE, 20000L, BigDecimal.ZERO);
+        ride.setStartedAt(testTime.minusDays(1));
         Activity activity = createActivity(Activity.ActivityType.SWIM, 2000L, BigDecimal.ZERO);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(15L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(5L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(30000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(3L);
+        stubHistory(run, ride, activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -267,10 +263,7 @@ class AchievementServiceTest {
         metrics.setMaxSpeed(BigDecimal.valueOf(45.0)); // 45 km/h (realistic for cycling)
         activity.setMetrics(metrics);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(10L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(5L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(200000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
+        stubHistory(activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -285,19 +278,18 @@ class AchievementServiceTest {
     @Test
     @DisplayName("Should award 7-day streak achievement")
     void testCheckAndAwardAchievements_7DayStreak() {
-        // Given - User has 7+ consecutive days of activities
+        // Given - Current activity completes a 7-day streak
+        List<Activity> history = new ArrayList<>();
+        LocalDate anchorDate = testTime.toLocalDate();
+        for (int i = 6; i >= 1; i--) {
+            Activity previous = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+            previous.setStartedAt(anchorDate.minusDays(i).atTime(10, 0));
+            history.add(previous);
+        }
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
+        history.add(activity);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(20L);
-        when(activityRepository.countByUserIdAndActivityType(any(), any())).thenReturn(10L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(100000));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
-        // Streak source: 8 consecutive days of activity ending today, as raw timestamps
-        java.time.LocalDateTime now = java.time.LocalDateTime.now();
-        when(activityRepository.findActivityStartTimestampsSince(any(), any())).thenReturn(List.of(
-            now, now.minusDays(1), now.minusDays(2), now.minusDays(3),
-            now.minusDays(4), now.minusDays(5), now.minusDays(6), now.minusDays(7)
-        ));
+        stubHistory(history);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -314,8 +306,7 @@ class AchievementServiceTest {
     void testCheckAndAwardAchievements_AlreadyEarned() {
         // Given - User already has every achievement
         Activity activity = createActivity(Activity.ActivityType.RUN, 5000L, BigDecimal.ZERO);
-
-        when(activityRepository.countByUserId(userId)).thenReturn(10L);
+        stubHistory(activity);
         // Simulate "user already has all achievements" by returning one of every type from the
         // preload query that checkAndAwardAchievements uses to populate the in-memory set.
         List<Achievement> allEarned = new java.util.ArrayList<>();
@@ -359,11 +350,7 @@ class AchievementServiceTest {
         metrics.setMaxSpeed(BigDecimal.valueOf(16.0)); // 57.6 km/h (unrealistic for run, but for testing)
         activity.setMetrics(metrics);
 
-        when(activityRepository.countByUserId(userId)).thenReturn(1L); // First activity
-        when(activityRepository.countByUserIdAndActivityType(userId, Activity.ActivityType.RUN)).thenReturn(1L);
-        when(activityRepository.sumDistanceByUserId(userId)).thenReturn(BigDecimal.valueOf(5000));
-        when(activityRepository.sumElevationGainByUserId(userId)).thenReturn(BigDecimal.valueOf(1100));
-        when(activityRepository.countDistinctActivityTypesByUserId(userId)).thenReturn(1L);
+        stubHistory(activity);
         when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When
@@ -378,6 +365,30 @@ class AchievementServiceTest {
         assertTrue(achievements.stream().anyMatch(a ->
             a.getAchievementType() == Achievement.AchievementType.MOUNTAINEER_1000M
         ));
+    }
+
+    @Test
+    @DisplayName("Should use activity end time as earnedAt for historical milestone")
+    void testCheckAndAwardAchievements_UsesActivityEndTimeForEarnedAt() {
+        Activity previous = createActivity(Activity.ActivityType.RUN, 9000L, BigDecimal.ZERO);
+        previous.setStartedAt(LocalDateTime.of(2025, 11, 30, 10, 0));
+        previous.setEndedAt(LocalDateTime.of(2025, 11, 30, 11, 0));
+        Activity activity = createActivity(Activity.ActivityType.RUN, 2000L, BigDecimal.ZERO);
+        activity.setStartedAt(LocalDateTime.of(2025, 12, 1, 7, 15));
+        activity.setEndedAt(LocalDateTime.of(2025, 12, 1, 8, 5));
+
+        stubHistory(previous, activity);
+        when(achievementRepository.save(any(Achievement.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<Achievement> achievements = achievementService.checkAndAwardAchievements(activity);
+
+        Achievement distanceAchievement = achievements.stream()
+                .filter(a -> a.getAchievementType() == Achievement.AchievementType.DISTANCE_10K)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(activity.getEndedAt(), distanceAchievement.getEarnedAt());
+        assertEquals(activity.getId(), distanceAchievement.getActivityId());
     }
 
     @Test
@@ -421,6 +432,7 @@ class AchievementServiceTest {
                 .userId(userId)
                 .activityType(activityType)
                 .startedAt(testTime)
+                .endedAt(testTime.plusHours(1))
                 .totalDistance(BigDecimal.valueOf(distanceMeters))
                 .totalDurationSeconds(3600L)
                 .elevationGain(elevationGain)
@@ -438,5 +450,13 @@ class AchievementServiceTest {
                 .badgeColor("#ff00ff")
                 .earnedAt(testTime)
                 .build();
+    }
+
+    private void stubHistory(Activity... activities) {
+        stubHistory(List.of(activities));
+    }
+
+    private void stubHistory(List<Activity> activities) {
+        when(activityRepository.findByUserIdOrderByStartedAtAsc(userId)).thenReturn(activities);
     }
 }
