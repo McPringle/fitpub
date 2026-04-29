@@ -21,6 +21,7 @@ import net.javahippie.fitpub.util.FitFileValidator;
 import net.javahippie.fitpub.util.FitParser;
 import net.javahippie.fitpub.util.ParsedActivityData;
 import net.javahippie.fitpub.util.TrackSimplifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.math.BigDecimal;
@@ -73,6 +74,9 @@ class FitFileServiceTest {
 
     @Mock
     private HeatmapGridService heatmapGridService;
+
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
 
     @Spy
     private ObjectMapper objectMapper;
@@ -240,10 +244,10 @@ class FitFileServiceTest {
         // Assert
         assertTrue(result);
         verify(activityRepository).delete(activity);
-        verify(achievementService).rebuildAchievementsForUser(testUserId);
-        verify(activitySummaryService).updateWeeklySummary(testUserId, startedAt.toLocalDate());
-        verify(activitySummaryService).updateMonthlySummary(testUserId, startedAt.toLocalDate());
-        verify(activitySummaryService).updateYearlySummary(testUserId, startedAt.toLocalDate());
+        ArgumentCaptor<ActivityDeletedEvent> eventCaptor = ArgumentCaptor.forClass(ActivityDeletedEvent.class);
+        verify(applicationEventPublisher).publishEvent(eventCaptor.capture());
+        assertEquals(testUserId, eventCaptor.getValue().userId());
+        assertEquals(startedAt.toLocalDate(), eventCaptor.getValue().activityDate());
     }
 
     @Test
@@ -260,10 +264,7 @@ class FitFileServiceTest {
         // Assert
         assertFalse(result);
         verify(activityRepository, never()).delete(any());
-        verify(achievementService, never()).rebuildAchievementsForUser(any());
-        verify(activitySummaryService, never()).updateWeeklySummary(any(), any());
-        verify(activitySummaryService, never()).updateMonthlySummary(any(), any());
-        verify(activitySummaryService, never()).updateYearlySummary(any(), any());
+        verify(applicationEventPublisher, never()).publishEvent(any());
     }
 
     @Test
