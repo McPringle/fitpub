@@ -18,6 +18,7 @@ import net.javahippie.fitpub.util.FitFileValidator;
 import net.javahippie.fitpub.util.FitParser;
 import net.javahippie.fitpub.util.ParsedActivityData;
 import net.javahippie.fitpub.util.TrackSimplifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -52,6 +53,7 @@ public class FitFileService {
     private final ActivitySummaryService activitySummaryService;
     private final WeatherService weatherService;
     private final HeatmapGridService heatmapGridService;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     /**
      * Processes an uploaded FIT file and creates an activity.
@@ -319,12 +321,10 @@ public class FitFileService {
         return activityRepository.findByIdAndUserId(activityId, userId)
             .map(activity -> {
                 activityRepository.delete(activity);
-                achievementService.rebuildAchievementsForUser(userId);
                 if (activity.getStartedAt() != null) {
-                    java.time.LocalDate activityDate = activity.getStartedAt().toLocalDate();
-                    activitySummaryService.updateWeeklySummary(userId, activityDate);
-                    activitySummaryService.updateMonthlySummary(userId, activityDate);
-                    activitySummaryService.updateYearlySummary(userId, activityDate);
+                    applicationEventPublisher.publishEvent(
+                        new ActivityDeletedEvent(userId, activity.getStartedAt().toLocalDate())
+                    );
                 }
                 log.info("Deleted activity {} for user {}", activityId, userId);
                 return true;
