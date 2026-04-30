@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}">
+
+<head>
+    <title th:text="${pageTitle}">Feature Unavailable</title>
+</head>
+
+<body>
+<div layout:fragment="content">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="text-center mb-4">
+                <h2 class="mb-3">
+                    <i th:class="${featureIcon != null ? featureIcon : 'bi bi-slash-circle text-secondary'}"></i>
+                    <span th:text="${featureName != null ? featureName : 'Feature'}">Feature</span>
+                </h2>
+                <p class="text-muted mb-0"
+                   th:text="${featureMessage != null ? featureMessage : 'This feature is currently unavailable on this FitPub instance.'}">
+                    This feature is currently unavailable on this FitPub instance.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
