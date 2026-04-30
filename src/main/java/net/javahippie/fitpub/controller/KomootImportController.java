@@ -3,6 +3,7 @@ package net.javahippie.fitpub.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javahippie.fitpub.config.KomootSupport;
 import net.javahippie.fitpub.model.dto.KomootActivityImportRequest;
 import net.javahippie.fitpub.model.dto.KomootActivitiesResponse;
 import net.javahippie.fitpub.model.dto.KomootImportExecutionResponse;
@@ -30,6 +31,7 @@ import java.util.UUID;
 @Slf4j
 public class KomootImportController {
 
+    private final KomootSupport komootSupport;
     private final KomootImportService komootImportService;
     private final UserRepository userRepository;
 
@@ -38,6 +40,8 @@ public class KomootImportController {
             @Valid @RequestBody KomootImportRequest request,
             Authentication authentication
     ) {
+        ensureKomootSupportEnabled();
+
         UUID fitPubUserId = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new IllegalArgumentException("Authenticated user not found"))
                 .getId();
@@ -53,6 +57,8 @@ public class KomootImportController {
             @Valid @RequestBody KomootActivityImportRequest request,
             Authentication authentication
     ) {
+        ensureKomootSupportEnabled();
+
         UUID fitPubUserId = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new IllegalArgumentException("Authenticated user not found"))
                 .getId();
@@ -65,6 +71,12 @@ public class KomootImportController {
                 fitPubUserId
         );
         return ResponseEntity.ok(response);
+    }
+
+    private void ensureKomootSupportEnabled() {
+        if (!komootSupport.isEnabled()) {
+            throw new KomootSupportDisabledException();
+        }
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -86,5 +98,13 @@ public class KomootImportController {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(new ErrorResponse(e.getMessage()));
     }
 
+    @ExceptionHandler(KomootSupportDisabledException.class)
+    public ResponseEntity<ErrorResponse> handleKomootSupportDisabled(KomootSupportDisabledException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("Komoot support is disabled."));
+    }
+
     record ErrorResponse(String error) {}
+
+    static class KomootSupportDisabledException extends RuntimeException {
+    }
 }
