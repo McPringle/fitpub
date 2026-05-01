@@ -14,8 +14,8 @@ import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.RemoteActorRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.service.FederationService;
+import net.javahippie.fitpub.service.TextValidationService;
 import net.javahippie.fitpub.service.WebFingerClient;
-import net.javahippie.fitpub.service.UserBioValidationService;
 import net.javahippie.fitpub.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -48,7 +48,7 @@ public class UserController {
     private final WebFingerClient webFingerClient;
     private final FederationService federationService;
     private final UserService userService;
-    private final UserBioValidationService userBioValidationService;
+    private final TextValidationService textValidationService;
     private final net.javahippie.fitpub.repository.ActivityPeakRepository activityPeakRepository;
 
     @Value("${fitpub.base-url}")
@@ -103,7 +103,7 @@ public class UserController {
     ) {
         log.info("User {} updating profile", userDetails.getUsername());
 
-        userBioValidationService.validate(request.getBio());
+        textValidationService.validateUserBio(request.getBio());
 
         User user = userRepository.findByUsername(userDetails.getUsername())
             .orElseThrow(() -> new UsernameNotFoundException("User not found"));
