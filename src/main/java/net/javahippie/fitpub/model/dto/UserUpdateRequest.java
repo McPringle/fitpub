@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import net.javahippie.fitpub.model.entity.User;
 import org.hibernate.validator.constraints.URL;
 
 /**
@@ -22,6 +23,8 @@ public class UserUpdateRequest {
     private String displayName;
 
     private String bio;
+
+    private User.ProfileVisibility profileVisibility;
 
     @URL(message = "Avatar URL must be a valid URL")
     private String avatarUrl;

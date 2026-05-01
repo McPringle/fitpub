@@ -323,6 +323,12 @@ const FitPubAuth = {
             return;
         }
 
+        // Public profile pages are public (visibility is enforced by the profile API)
+        // Pattern: /users/{username}
+        if (currentPath.startsWith('/users/') && currentPath.split('/').length === 3) {
+            return;
+        }
+
         if (currentPath.startsWith('/terms')) {
             return;
         }

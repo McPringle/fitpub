@@ -15,17 +15,20 @@ import net.javahippie.fitpub.repository.RemoteActorRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.TextValidationService;
+import net.javahippie.fitpub.service.ProfileAccessService;
 import net.javahippie.fitpub.service.WebFingerClient;
 import net.javahippie.fitpub.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +52,7 @@ public class UserController {
     private final FederationService federationService;
     private final UserService userService;
     private final TextValidationService textValidationService;
+    private final ProfileAccessService profileAccessService;
     private final net.javahippie.fitpub.repository.ActivityPeakRepository activityPeakRepository;
 
     @Value("${fitpub.base-url}")
@@ -68,6 +72,14 @@ public class UserController {
 
         dto.setFollowersCount(followersCount);
         dto.setFollowingCount((long) followingCount);
+    }
+
+    private User getCurrentUserOrNull(UserDetails userDetails) {
+        if (userDetails == null) {
+            return null;
+        }
+
+        return userRepository.findByUsername(userDetails.getUsername()).orElse(null);
     }
 
     /**
@@ -114,6 +126,9 @@ public class UserController {
         }
         if (request.getBio() != null) {
             user.setBio(request.getBio().trim());
+        }
+        if (request.getProfileVisibility() != null) {
+            user.setProfileVisibility(request.getProfileVisibility());
         }
         if (request.getAvatarUrl() != null) {
             user.setAvatarUrl(request.getAvatarUrl().trim());
@@ -181,13 +196,21 @@ public class UserController {
      * @return user profile
      */
     @GetMapping("/{username}")
-    public ResponseEntity<UserDTO> getUserByUsername(@PathVariable String username) {
+    public ResponseEntity<UserDTO> getUserByUsername(
+        @PathVariable String username,
+        @AuthenticationPrincipal UserDetails userDetails
+    ) {
         log.debug("Retrieving profile for username: {}", username);
 
         User user = userRepository.findByUsername(username)
             .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
-        UserDTO dto = UserDTO.fromEntity(user);
+        User viewer = getCurrentUserOrNull(userDetails);
+        profileAccessService.requireProfileAccess(user, viewer);
+
+        UserDTO dto = viewer != null && viewer.getId().equals(user.getId())
+            ? UserDTO.fromEntity(user)
+            : UserDTO.fromEntityPublic(user);
         populateSocialCounts(dto, user);
 
         return ResponseEntity.ok(dto);
@@ -200,13 +223,21 @@ public class UserController {
      * @return user profile
      */
     @GetMapping("/id/{id}")
-    public ResponseEntity<UserDTO> getUserById(@PathVariable UUID id) {
+    public ResponseEntity<UserDTO> getUserById(
+        @PathVariable UUID id,
+        @AuthenticationPrincipal UserDetails userDetails
+    ) {
         log.debug("Retrieving profile for user ID: {}", id);
 
         User user = userRepository.findById(id)
             .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
-        UserDTO dto = UserDTO.fromEntity(user);
+        User viewer = getCurrentUserOrNull(userDetails);
+        profileAccessService.requireProfileAccess(user, viewer);
+
+        UserDTO dto = viewer != null && viewer.getId().equals(user.getId())
+            ? UserDTO.fromEntity(user)
+            : UserDTO.fromEntityPublic(user);
         populateSocialCounts(dto, user);
 
         return ResponseEntity.ok(dto);
@@ -627,12 +658,16 @@ public class UserController {
      */
     @GetMapping("/{username}/peaks")
     public ResponseEntity<java.util.List<Map<String, Object>>> getUserPeaks(
-        @PathVariable String username
+        @PathVariable String username,
+        @AuthenticationPrincipal UserDetails userDetails
     ) {
         User user = userRepository.findByUsername(username).orElse(null);
         if (user == null) {
             return ResponseEntity.notFound().build();
         }
+
+        User viewer = getCurrentUserOrNull(userDetails);
+        profileAccessService.requireProfileAccess(user, viewer);
 
         var projections = activityPeakRepository.findPeaksVisitedByUser(user.getId());
         var result = projections.stream()
@@ -649,4 +684,13 @@ public class UserController {
 
         return ResponseEntity.ok(result);
     }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatusException(ResponseStatusException e) {
+        HttpStatus status = HttpStatus.valueOf(e.getStatusCode().value());
+        String message = e.getReason() != null ? e.getReason() : status.getReasonPhrase();
+        return ResponseEntity.status(status).body(new ErrorResponse(status.name(), message));
+    }
+
+    record ErrorResponse(String error, String message) {}
 }

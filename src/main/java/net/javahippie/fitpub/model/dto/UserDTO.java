@@ -24,6 +24,7 @@ public class UserDTO {
     private String email;  // Only shown to the user themselves
     private String displayName;
     private String bio;
+    private User.ProfileVisibility profileVisibility;
     private String avatarUrl;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -52,6 +53,7 @@ public class UserDTO {
             .email(user.getEmail())
             .displayName(user.getDisplayName())
             .bio(user.getBio())
+            .profileVisibility(user.getProfileVisibility())
             .avatarUrl(user.getAvatarUrl())
             .homeLatitude(user.getHomeLatitude())
             .homeLongitude(user.getHomeLongitude())
@@ -72,6 +74,7 @@ public class UserDTO {
             .username(user.getUsername())
             .displayName(user.getDisplayName())
             .bio(user.getBio())
+            .profileVisibility(user.getProfileVisibility())
             .avatarUrl(user.getAvatarUrl())
             .createdAt(user.getCreatedAt())
             .updatedAt(user.getUpdatedAt())
