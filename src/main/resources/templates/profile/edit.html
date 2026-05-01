@@ -60,6 +60,17 @@
                                 </div>
                             </div>
 
+                            <!-- Profile visibility -->
+                            <div class="mb-4">
+                                <label for="profileVisibility" class="form-label">Profile Visibility</label>
+                                <select class="form-select" id="profileVisibility" name="profileVisibility">
+                                    <option value="PUBLIC">Public - Anyone can see</option>
+                                    <option value="FOLLOWERS">Followers Only - Only your followers can see</option>
+                                    <option value="PRIVATE">Private - Only you can see</option>
+                                </select>
+                                <div class="form-text">Controls who can view your profile page.</div>
+                            </div>
+
                             <!-- Home Location Section -->
                             <div class="mb-4">
                                 <h5 class="mb-3">
@@ -254,6 +265,7 @@
                         const formData = {
                             displayName: document.getElementById('displayName').value.trim(),
                             bio: document.getElementById('bio').value.trim(),
+                            profileVisibility: document.getElementById('profileVisibility').value,
                             avatarUrl: document.getElementById('avatarUrl').value.trim(),
                             homeLatitude: document.getElementById('homeLatitude').value ? parseFloat(document.getElementById('homeLatitude').value) : null,
                             homeLongitude: document.getElementById('homeLongitude').value ? parseFloat(document.getElementById('homeLongitude').value) : null,
@@ -320,6 +332,7 @@
                 function populateForm(user) {
                     document.getElementById('displayName').value = user.displayName || '';
                     document.getElementById('bio').value = user.bio || '';
+                    document.getElementById('profileVisibility').value = user.profileVisibility || 'FOLLOWERS';
                     document.getElementById('avatarUrl').value = user.avatarUrl || '';
                     document.getElementById('email').value = user.email || '';
                     document.getElementById('username').value = user.username || '';

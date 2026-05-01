@@ -43,6 +43,11 @@ public class User {
     @Column(columnDefinition = "TEXT")
     private String bio;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "profile_visibility", nullable = false, length = 20)
+    @Builder.Default
+    private ProfileVisibility profileVisibility = ProfileVisibility.FOLLOWERS;
+
     @Column(name = "avatar_url")
     private String avatarUrl;
 
@@ -111,5 +116,11 @@ public class User {
      */
     public String getWebFingerAccount(String domain) {
         return String.format("acct:%s@%s", username, domain);
+    }
+
+    public enum ProfileVisibility {
+        PUBLIC,
+        FOLLOWERS,
+        PRIVATE
     }
 }

@@ -24,6 +24,11 @@
             <span id="errorMessage"></span>
         </div>
 
+        <div id="accessNotice" class="alert alert-info d-none" role="alert">
+            <i class="bi bi-shield-lock"></i>
+            <span id="accessNoticeMessage"></span>
+        </div>
+
         <!-- Profile Content -->
         <div id="profileContent" class="d-none">
             <!-- Profile Header -->
@@ -156,10 +161,20 @@
                 function loadProfile() {
                     // For now, we'll fetch from the user API endpoint
                     // In the future, this should use /api/users/{username}
-                    fetch(`/api/users/${targetUsername}`)
+                    fetch(`/api/users/${targetUsername}`, {
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    })
                         .then(response => {
                             if (!response.ok) {
-                                throw new Error('User not found');
+                                return response.json()
+                                    .catch(() => ({}))
+                                    .then(errorData => {
+                                        const error = new Error(errorData.message || 'User not found');
+                                        error.status = response.status;
+                                        throw error;
+                                    });
                             }
                             return response.json();
                         })
@@ -171,8 +186,13 @@
                         .catch(error => {
                             console.error('Error loading profile:', error);
                             document.getElementById('loadingIndicator').classList.add('d-none');
-                            document.getElementById('errorMessage').textContent = 'User not found or profile could not be loaded.';
-                            document.getElementById('errorAlert').classList.remove('d-none');
+                            if (error.status === 403) {
+                                document.getElementById('accessNoticeMessage').textContent = error.message;
+                                document.getElementById('accessNotice').classList.remove('d-none');
+                            } else {
+                                document.getElementById('errorMessage').textContent = 'User not found or profile could not be loaded.';
+                                document.getElementById('errorAlert').classList.remove('d-none');
+                            }
                         });
                 }
 
