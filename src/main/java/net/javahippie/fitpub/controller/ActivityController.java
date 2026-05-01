@@ -13,9 +13,11 @@ import net.javahippie.fitpub.model.entity.PrivacyZone;
 import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
+import net.javahippie.fitpub.service.ActivityDescriptionValidationService;
 import net.javahippie.fitpub.service.ActivityFileService;
 import net.javahippie.fitpub.service.ActivityImageService;
 import net.javahippie.fitpub.service.ActivityPostProcessingService;
+import net.javahippie.fitpub.service.ActivityTitleValidationService;
 import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.WeatherService;
 import net.javahippie.fitpub.service.FitFileService;
@@ -48,6 +50,8 @@ import java.util.UUID;
 @Slf4j
 public class ActivityController {
 
+    private final ActivityDescriptionValidationService activityDescriptionValidationService;
+    private final ActivityTitleValidationService activityTitleValidationService;
     private final ActivityFileService activityFileService;
     private final FitFileService fitFileService;
     private final UserRepository userRepository;
@@ -152,6 +156,9 @@ public class ActivityController {
         @AuthenticationPrincipal UserDetails userDetails
     ) {
         log.info("User {} uploading activity file: {}", userDetails.getUsername(), file.getOriginalFilename());
+
+        activityTitleValidationService.validate(request.getTitle());
+        activityDescriptionValidationService.validate(request.getDescription());
 
         User user = userRepository.findByUsername(userDetails.getUsername())
             .orElseThrow(() -> new UsernameNotFoundException("User not found"));
@@ -310,6 +317,9 @@ public class ActivityController {
         log.info("User {} updating activity {}", userDetails.getUsername(), id);
 
         UUID userId = getUserId(userDetails);
+
+        activityTitleValidationService.validate(request.getTitle());
+        activityDescriptionValidationService.validate(request.getDescription());
 
         try {
             Activity updated = fitFileService.updateActivity(

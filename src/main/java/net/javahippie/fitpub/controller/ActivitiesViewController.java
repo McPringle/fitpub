@@ -1,5 +1,9 @@
 package net.javahippie.fitpub.controller;
 
+import lombok.RequiredArgsConstructor;
+import net.javahippie.fitpub.service.ActivityDescriptionValidationService;
+import net.javahippie.fitpub.service.ActivityTitleValidationService;
+import org.springframework.ui.Model;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,7 +14,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
  */
 @Controller
 @RequestMapping("/activities")
+@RequiredArgsConstructor
 public class ActivitiesViewController {
+
+    private final ActivityDescriptionValidationService activityDescriptionValidationService;
+    private final ActivityTitleValidationService activityTitleValidationService;
 
     /**
      * Show activities list page
@@ -24,7 +32,9 @@ public class ActivitiesViewController {
      * Show activity upload page
      */
     @GetMapping("/upload")
-    public String uploadActivity() {
+    public String uploadActivity(Model model) {
+        model.addAttribute("activityTitleMaxLength", activityTitleValidationService.getMaxLength());
+        model.addAttribute("activityDescriptionMaxLength", activityDescriptionValidationService.getMaxLength());
         return "activities/upload";
     }
 
@@ -41,8 +51,10 @@ public class ActivitiesViewController {
      * Show activity edit page
      */
     @GetMapping("/{id}/edit")
-    public String editActivity(@PathVariable String id) {
+    public String editActivity(@PathVariable String id, Model model) {
         // The activity data will be loaded via JavaScript API calls
+        model.addAttribute("activityTitleMaxLength", activityTitleValidationService.getMaxLength());
+        model.addAttribute("activityDescriptionMaxLength", activityDescriptionValidationService.getMaxLength());
         return "activities/edit";
     }
 }
