@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -15,9 +16,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -56,11 +59,13 @@ class ActivityPostProcessingServiceTest {
     private UUID userId;
     private Activity testActivity;
     private User testUser;
+    private LocalDateTime createdAt;
 
     @BeforeEach
     void setUp() {
         activityId = UUID.randomUUID();
         userId = UUID.randomUUID();
+        createdAt = LocalDateTime.of(2026, 5, 2, 9, 24, 50, 921_241_000);
 
         // Set baseUrl via reflection (since it's @Value injected)
         ReflectionTestUtils.setField(service, "baseUrl", "https://test.example");
@@ -76,8 +81,8 @@ class ActivityPostProcessingServiceTest {
             .totalDistance(BigDecimal.valueOf(5000))
             .totalDurationSeconds(1800L)
             .elevationGain(BigDecimal.valueOf(100))
-            .startedAt(LocalDateTime.now())
-            .createdAt(LocalDateTime.now())
+            .startedAt(createdAt.minusMinutes(30))
+            .createdAt(createdAt)
             .build();
 
         // Create test user
@@ -230,6 +235,24 @@ class ActivityPostProcessingServiceTest {
 
         // Then
         verify(federationService).sendCreateActivity(anyString(), any(), eq(testUser), eq(false));
+    }
+
+    @Test
+    @DisplayName("Should serialize federation note published timestamp with timezone")
+    void testPublishToFederationAsync_PublishedTimestampIncludesTimezone() {
+        when(activityRepository.findById(activityId)).thenReturn(Optional.of(testActivity));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(activityImageService.generateActivityImage(testActivity)).thenReturn(null);
+        doNothing().when(federationService).sendCreateActivity(anyString(), any(), any(), anyBoolean());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Map<String, Object>> noteCaptor = ArgumentCaptor.forClass(java.util.Map.class);
+
+        service.publishToFederationAsync(activityId, userId);
+
+        verify(federationService).sendCreateActivity(anyString(), noteCaptor.capture(), eq(testUser), eq(true));
+        assertThat(noteCaptor.getValue().get("published"))
+            .isEqualTo(createdAt.atOffset(ZoneOffset.UTC).toInstant().toString());
     }
 
     @Test
