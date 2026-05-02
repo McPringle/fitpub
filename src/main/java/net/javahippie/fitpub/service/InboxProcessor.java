@@ -21,6 +21,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.UUID;
 
@@ -411,7 +416,7 @@ public class InboxProcessor {
 
             // Parse published timestamp
             String publishedStr = (String) noteObject.get("published");
-            Instant publishedAt = publishedStr != null ? Instant.parse(publishedStr) : Instant.now();
+            Instant publishedAt = parsePublishedAt(publishedStr);
 
             // Build RemoteActivity entity
             RemoteActivity remoteActivity = RemoteActivity.builder()
@@ -821,6 +826,44 @@ public class InboxProcessor {
         } catch (Exception e) {
             log.warn("Failed to parse ISO duration: {}", isoDuration, e);
             return null;
+        }
+    }
+
+    /**
+     * Parse ActivityPub published timestamps.
+     *
+     * <p>Preferred input is a full ISO-8601 instant with timezone/offset. Some
+     * remote implementations still send zoneless timestamps, so we accept those
+     * as a compatibility fallback and interpret them as UTC.
+     */
+    private Instant parsePublishedAt(String publishedStr) {
+        if (publishedStr == null || publishedStr.isBlank()) {
+            return Instant.now();
+        }
+
+        try {
+            return Instant.parse(publishedStr);
+        } catch (DateTimeParseException ignored) {
+            // Fall through to compatibility parsers below.
+        }
+
+        try {
+            return OffsetDateTime.parse(publishedStr).toInstant();
+        } catch (DateTimeParseException ignored) {
+            // Fall through to compatibility parsers below.
+        }
+
+        try {
+            return ZonedDateTime.parse(publishedStr).toInstant();
+        } catch (DateTimeParseException ignored) {
+            // Fall through to compatibility parsers below.
+        }
+
+        try {
+            return LocalDateTime.parse(publishedStr).atOffset(ZoneOffset.UTC).toInstant();
+        } catch (DateTimeParseException e) {
+            log.warn("Failed to parse published timestamp: {}", publishedStr, e);
+            return Instant.now();
         }
     }
 
