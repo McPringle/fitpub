@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -199,7 +200,7 @@ public class ActivityPostProcessingService {
             noteObject.put("id", activityUri);
             noteObject.put("type", "Note");
             noteObject.put("attributedTo", actorUri);
-            noteObject.put("published", activity.getCreatedAt().toString());
+            noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
             noteObject.put("content", formatActivityContent(activity));
             noteObject.put("url", baseUrl + "/activities/" + activity.getId());
 

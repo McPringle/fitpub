@@ -29,6 +29,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -436,7 +437,7 @@ public class ActivityPubController {
         noteObject.put("id", activityUri);
         noteObject.put("type", "Note");
         noteObject.put("attributedTo", actorUri);
-        noteObject.put("published", activity.getCreatedAt().toString());
+        noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
         noteObject.put("content", formatActivityContent(activity));
         noteObject.put("url", activityUri);
 
