@@ -2,19 +2,25 @@ package net.javahippie.fitpub.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.javahippie.fitpub.config.TestcontainersConfiguration;
+import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.service.ActivityImageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import net.javahippie.fitpub.model.entity.Follow;
 import net.javahippie.fitpub.model.entity.RemoteActor;
+import net.javahippie.fitpub.model.entity.RemoteActivity;
 import net.javahippie.fitpub.model.entity.User;
+import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.FollowRepository;
+import net.javahippie.fitpub.repository.RemoteActivityRepository;
 import net.javahippie.fitpub.repository.RemoteActorRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,15 +32,21 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
+import java.math.BigDecimal;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -64,6 +76,12 @@ class FederationFollowFlowIntegrationTest {
     private RemoteActorRepository remoteActorRepository;
 
     @Autowired
+    private RemoteActivityRepository remoteActivityRepository;
+
+    @Autowired
+    private ActivityRepository activityRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -71,6 +89,9 @@ class FederationFollowFlowIntegrationTest {
 
     @Autowired
     private HttpSignatureValidator signatureValidator;
+
+    @MockBean
+    private ActivityImageService activityImageService;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -99,6 +120,22 @@ class FederationFollowFlowIntegrationTest {
 
         // Generate JWT token
         authToken = jwtTokenProvider.createToken(testUser.getUsername());
+    }
+
+    private User createFederatedUser(String username, String email, String displayName) throws NoSuchAlgorithmException {
+        KeyPair keyPair = generateRsaKeyPair();
+        String publicKey = encodePublicKey(keyPair.getPublic().getEncoded());
+        String privateKey = encodePrivateKey(keyPair.getPrivate().getEncoded());
+
+        return userRepository.save(User.builder()
+            .username(username)
+            .email(email)
+            .passwordHash(passwordEncoder.encode("password123"))
+            .displayName(displayName)
+            .publicKey(publicKey)
+            .privateKey(privateKey)
+            .enabled(true)
+            .build());
     }
 
     private KeyPair generateRsaKeyPair() throws NoSuchAlgorithmException {
@@ -271,6 +308,107 @@ class FederationFollowFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("Should import its own exported public activity through inbox")
+    void testActivityRoundtripThroughExportAndInbox() throws Exception {
+        User importingUser = testUser;
+        User exportingUser = createFederatedUser("janedoe", "janedoe@example.com", "Jane Doe");
+
+        Activity activity = activityRepository.save(Activity.builder()
+            .userId(exportingUser.getId())
+            .activityType(Activity.ActivityType.RUN)
+            .title("Lunch Run")
+            .description("Sunny run in the city")
+            .startedAt(LocalDateTime.of(2026, 5, 2, 12, 0))
+            .endedAt(LocalDateTime.of(2026, 5, 2, 12, 30))
+            .createdAt(LocalDateTime.of(2026, 5, 2, 12, 31, 45, 123_000_000))
+            .visibility(Activity.Visibility.PUBLIC)
+            .totalDistance(BigDecimal.valueOf(5000))
+            .totalDurationSeconds(1800L)
+            .elevationGain(BigDecimal.valueOf(100))
+            .sourceFileFormat("FIT")
+            .published(true)
+            .build());
+
+        String exportingActorUri = baseUrl + "/users/" + exportingUser.getUsername();
+        when(activityImageService.getActivityImageFile(activity.getId()))
+            .thenReturn(new File("/definitely/nonexistent-fitpub-roundtrip-image"));
+
+        remoteActorRepository.save(RemoteActor.builder()
+            .actorUri(exportingActorUri)
+            .username(exportingUser.getUsername())
+            .domain(java.net.URI.create(baseUrl).getHost())
+            .displayName(exportingUser.getDisplayName())
+            .inboxUrl(exportingActorUri + "/inbox")
+            .outboxUrl(exportingActorUri + "/outbox")
+            .publicKey(exportingUser.getPublicKey())
+            .publicKeyId(exportingActorUri + "#main-key")
+            .lastFetchedAt(Instant.now())
+            .build());
+
+        followRepository.save(Follow.builder()
+            .followerId(importingUser.getId())
+            .followingActorUri(exportingActorUri)
+            .status(Follow.FollowStatus.ACCEPTED)
+            .activityId(baseUrl + "/activities/follow/" + UUID.randomUUID())
+            .build());
+
+        MvcResult exportResult = mockMvc.perform(get("/activities/" + activity.getId())
+                .accept("application/activity+json"))
+            .andExpect(status().isOk())
+            .andReturn();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> exportedNote = objectMapper.readValue(exportResult.getResponse().getContentAsByteArray(), Map.class);
+
+        Map<String, Object> createActivity = Map.of(
+            "@context", "https://www.w3.org/ns/activitystreams",
+            "type", "Create",
+            "id", baseUrl + "/activities/create/" + UUID.randomUUID(),
+            "actor", exportingActorUri,
+            "object", exportedNote
+        );
+
+        String privateKeyPem = exportingUser.getPrivateKey();
+        String inboxPath = "/users/" + importingUser.getUsername() + "/inbox";
+        String inboxUrl = "http://localhost" + inboxPath;
+        String body = objectMapper.writeValueAsString(createActivity);
+        HttpSignatureValidator.SignatureHeaders sigHeaders = signatureValidator.signRequest(
+            "POST", inboxUrl, body, privateKeyPem, exportingActorUri + "#main-key"
+        );
+
+        mockMvc.perform(post(inboxPath)
+                .contentType("application/activity+json")
+                .header("Host", sigHeaders.host)
+                .header("Date", sigHeaders.date)
+                .header("Digest", sigHeaders.digest)
+                .header("Signature", sigHeaders.signature)
+                .content(body))
+            .andExpect(status().isAccepted());
+
+        RemoteActivity imported = remoteActivityRepository.findByActivityUri((String) exportedNote.get("id"))
+            .orElseThrow();
+
+        assertThat(imported.getActivityUri()).isEqualTo(exportedNote.get("id"));
+        assertThat(imported.getRemoteActorUri()).isEqualTo(exportingActorUri);
+        assertThat(imported.getTitle()).isEqualTo(exportedNote.getOrDefault("name",
+            exportedNote.getOrDefault("summary", "Untitled Activity")));
+        assertThat(imported.getDescription()).isEqualTo(stripHtml((String) exportedNote.get("content")));
+        assertThat(imported.getPublishedAt()).isEqualTo(Instant.parse((String) exportedNote.get("published")));
+        assertThat(imported.getVisibility()).isEqualTo(RemoteActivity.Visibility.PUBLIC);
+        assertThat(imported.getActivityType()).isNull();
+        assertThat(imported.getTotalDistance()).isNull();
+        assertThat(imported.getTotalDurationSeconds()).isNull();
+        assertThat(imported.getElevationGain()).isNull();
+        assertThat(imported.getAveragePaceSeconds()).isNull();
+        assertThat(imported.getAverageHeartRate()).isNull();
+        assertThat(imported.getMaxSpeed()).isNull();
+        assertThat(imported.getAverageSpeed()).isNull();
+        assertThat(imported.getCalories()).isNull();
+        assertThat(imported.getMapImageUrl()).isNull();
+        assertThat(imported.getTrackGeojsonUrl()).isNull();
+    }
+
+    @Test
     @DisplayName("Should reject inbox POST without HTTP signature with 401")
     void testInboxRejectsUnsignedRequest() throws Exception {
         Map<String, Object> followActivity = Map.of(
@@ -308,6 +446,23 @@ class FederationFollowFlowIntegrationTest {
 
         performSignedInboxPost(testUser.getUsername(), followActivity, sender)
             .andExpect(status().isUnauthorized());
+    }
+
+    private String stripHtml(String html) {
+        if (html == null) {
+            return "";
+        }
+        return html
+            .replaceAll("<br\\s*/?>", "\n")
+            .replaceAll("<p>", "")
+            .replaceAll("</p>", "\n")
+            .replaceAll("<[^>]+>", "")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&amp;", "&")
+            .trim();
     }
 
     @Test
