@@ -10,6 +10,7 @@ import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
 import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.InboxProcessor;
+import net.javahippie.fitpub.service.WorkoutDataPayloadBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import java.io.File;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -58,6 +60,9 @@ class ActivityPubControllerTest {
 
     @Mock
     private ObjectMapper objectMapper;
+
+    @Mock
+    private WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
 
     @InjectMocks
     private ActivityPubController controller;
@@ -110,5 +115,51 @@ class ActivityPubControllerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().get("published"))
             .isEqualTo(createdAt.atOffset(ZoneOffset.UTC).toInstant().toString());
+    }
+
+    @Test
+    @DisplayName("Should include workoutData and FitPub context terms in activity note")
+    void getActivity_ShouldIncludeWorkoutDataAndExtendedContext() {
+        when(activityRepository.findById(activityId)).thenReturn(Optional.of(activity));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(activityImageService.getActivityImageFile(activityId)).thenReturn(new File("/definitely/nonexistent-fitpub-test-image"));
+        when(workoutDataPayloadBuilder.build(activity)).thenReturn(Map.of(
+            "activityType", "RUN",
+            "description", "Sunny run",
+            "distance", 5000L,
+            "duration", "PT30M",
+            "averagePace", "PT6M",
+            "route", Map.of(
+                "type", "FeatureCollection",
+                "features", List.of()
+            )
+        ));
+
+        ResponseEntity<Map<String, Object>> response = controller.getActivity(activityId);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().get("workoutData")).isEqualTo(Map.of(
+            "activityType", "RUN",
+            "description", "Sunny run",
+            "distance", 5000L,
+            "duration", "PT30M",
+            "averagePace", "PT6M",
+            "route", Map.of(
+                "type", "FeatureCollection",
+                "features", List.of()
+            )
+        ));
+
+        @SuppressWarnings("unchecked")
+        List<Object> context = (List<Object>) response.getBody().get("@context");
+        assertThat(context).hasSize(2);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> extensions = (Map<String, Object>) context.get(1);
+        assertThat(extensions)
+            .containsEntry("fitpub", "https://fitpub.social/ns#")
+            .containsEntry("workoutData", "fitpub:workoutData")
+            .containsEntry("route", "fitpub:route");
     }
 }
