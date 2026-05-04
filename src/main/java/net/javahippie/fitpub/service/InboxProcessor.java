@@ -16,6 +16,10 @@ import net.javahippie.fitpub.repository.CommentRepository;
 import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.LikeRepository;
 import net.javahippie.fitpub.repository.UserRepository;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.PrecisionModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +40,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class InboxProcessor {
+    private static final int GEOMETRY_SRID = 4326;
+    private static final GeometryFactory GEOMETRY_FACTORY =
+        new GeometryFactory(new PrecisionModel(), GEOMETRY_SRID);
 
     private final UserRepository userRepository;
     private final FollowRepository followRepository;
@@ -422,9 +429,12 @@ public class InboxProcessor {
             RemoteActivity remoteActivity = RemoteActivity.builder()
                 .activityUri(activityUri)
                 .remoteActorUri(actor)
-                .activityType((String) workoutData.get("activityType"))
+                .activityType(stringValue(workoutData.get("activityType")))
                 .title((String) noteObject.getOrDefault("name", noteObject.getOrDefault("summary", "Untitled Activity")))
-                .description(stripHtml((String) noteObject.get("content")))
+                .description(firstNonBlank(
+                    stringValue(workoutData.get("description")),
+                    stripHtml((String) noteObject.get("content"))
+                ))
                 .publishedAt(publishedAt)
                 .totalDistance(parseLong(workoutData.get("distance")))
                 .totalDurationSeconds(parseDurationSeconds((String) workoutData.get("duration")))
@@ -436,6 +446,7 @@ public class InboxProcessor {
                 .calories(parseInteger(workoutData.get("calories")))
                 .mapImageUrl(attachments.get("mapImage"))
                 .trackGeojsonUrl(attachments.get("trackGeojson"))
+                .simplifiedTrack(extractRoute(workoutData))
                 .visibility(visibility)
                 .activityPubObject(serializeToJson(noteObject))
                 .build();
@@ -708,6 +719,88 @@ public class InboxProcessor {
         }
 
         return workoutData;
+    }
+
+    private String stringValue(Object value) {
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    private LineString extractRoute(Map<String, Object> workoutData) {
+        Object routeObj = workoutData.get("route");
+        if (!(routeObj instanceof Map<?, ?> routeMap)) {
+            return null;
+        }
+
+        Object featuresObj = routeMap.get("features");
+        if (!(featuresObj instanceof java.util.List<?> features) || features.isEmpty()) {
+            return null;
+        }
+
+        for (Object featureObj : features) {
+            if (!(featureObj instanceof Map<?, ?> featureMap)) {
+                continue;
+            }
+
+            Object geometryObj = featureMap.get("geometry");
+            if (!(geometryObj instanceof Map<?, ?> geometryMap)) {
+                continue;
+            }
+
+            if (!"LineString".equals(geometryMap.get("type"))) {
+                continue;
+            }
+
+            LineString lineString = parseLineStringCoordinates(geometryMap.get("coordinates"));
+            if (lineString != null) {
+                return lineString;
+            }
+        }
+
+        return null;
+    }
+
+    private LineString parseLineStringCoordinates(Object coordinatesObj) {
+        if (!(coordinatesObj instanceof java.util.List<?> coordinateList) || coordinateList.size() < 2) {
+            return null;
+        }
+
+        java.util.List<Coordinate> coordinates = new java.util.ArrayList<>();
+        for (Object coordinateObj : coordinateList) {
+            Coordinate coordinate = parseCoordinate(coordinateObj);
+            if (coordinate == null) {
+                return null;
+            }
+            coordinates.add(coordinate);
+        }
+
+        if (coordinates.size() < 2) {
+            return null;
+        }
+
+        return GEOMETRY_FACTORY.createLineString(coordinates.toArray(new Coordinate[0]));
+    }
+
+    private Coordinate parseCoordinate(Object coordinateObj) {
+        if (!(coordinateObj instanceof java.util.List<?> coordinateValues) || coordinateValues.size() < 2) {
+            return null;
+        }
+
+        Double longitude = parseDouble(coordinateValues.get(0));
+        Double latitude = parseDouble(coordinateValues.get(1));
+        if (longitude == null || latitude == null) {
+            return null;
+        }
+
+        return new Coordinate(longitude, latitude);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /**

@@ -35,7 +35,8 @@ public final class ActivityPubContexts {
 
     /**
      * Returns the extended JSON-LD {@code @context} value for outbound objects
-     * that carry interaction-policy declarations. Shape:
+     * that carry both interaction-policy declarations and FitPub's proprietary
+     * {@code workoutData} extension fields. Shape:
      *
      * <pre>
      * [
@@ -45,7 +46,20 @@ public final class ActivityPubContexts {
      *     "interactionPolicy":  { "@id": "gts:interactionPolicy",  "@type": "@id" },
      *     "canQuote":           { "@id": "gts:canQuote",           "@type": "@id" },
      *     "automaticApproval":  { "@id": "gts:automaticApproval",  "@type": "@id" },
-     *     "manualApproval":     { "@id": "gts:manualApproval",     "@type": "@id" }
+     *     "manualApproval":     { "@id": "gts:manualApproval",     "@type": "@id" },
+     *     "fitpub": "https://fitpub.social/ns#",
+     *     "workoutData": "fitpub:workoutData",
+     *     "activityType": "fitpub:activityType",
+     *     "description": "fitpub:description",
+     *     "distance": "fitpub:distance",
+     *     "duration": "fitpub:duration",
+     *     "elevationGain": "fitpub:elevationGain",
+     *     "averagePace": "fitpub:averagePace",
+     *     "averageHeartRate": "fitpub:averageHeartRate",
+     *     "averageSpeed": "fitpub:averageSpeed",
+     *     "maxSpeed": "fitpub:maxSpeed",
+     *     "calories": "fitpub:calories",
+     *     "route": "fitpub:route"
      *   }
      * ]
      * </pre>
@@ -56,6 +70,12 @@ public final class ActivityPubContexts {
      * Mastodon source, "interaction_policies" extension), so a Mastodon
      * receiver compacting our object with its own context will recognise the
      * field names and apply the policy.
+     *
+     * <p>The {@code fitpub:} prefix is FitPub's own extension namespace
+     * ({@code https://fitpub.social/ns#}). It declares the proprietary
+     * {@code workoutData} object and its structured activity fields so FitPub
+     * instances can exchange machine-readable workout metadata without
+     * overloading the standard ActivityStreams fields.
      */
     public static List<Object> extendedContext() {
         Map<String, Object> extensions = new LinkedHashMap<>();
@@ -64,6 +84,19 @@ public final class ActivityPubContexts {
         extensions.put("canQuote",          typedRef("gts:canQuote"));
         extensions.put("automaticApproval", typedRef("gts:automaticApproval"));
         extensions.put("manualApproval",    typedRef("gts:manualApproval"));
+        extensions.put("fitpub", "https://fitpub.social/ns#");
+        extensions.put("workoutData", "fitpub:workoutData");
+        extensions.put("activityType", "fitpub:activityType");
+        extensions.put("description", "fitpub:description");
+        extensions.put("distance", "fitpub:distance");
+        extensions.put("duration", "fitpub:duration");
+        extensions.put("elevationGain", "fitpub:elevationGain");
+        extensions.put("averagePace", "fitpub:averagePace");
+        extensions.put("averageHeartRate", "fitpub:averageHeartRate");
+        extensions.put("averageSpeed", "fitpub:averageSpeed");
+        extensions.put("maxSpeed", "fitpub:maxSpeed");
+        extensions.put("calories", "fitpub:calories");
+        extensions.put("route", "fitpub:route");
         return List.of(
             "https://www.w3.org/ns/activitystreams",
             extensions

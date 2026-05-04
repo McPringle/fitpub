@@ -39,6 +39,7 @@ public class ActivityPostProcessingService {
     private final ActivityImageService activityImageService;
     private final ActivityRepository activityRepository;
     private final UserRepository userRepository;
+    private final WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -203,6 +204,7 @@ public class ActivityPostProcessingService {
             noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
             noteObject.put("content", formatActivityContent(activity));
             noteObject.put("url", baseUrl + "/activities/" + activity.getId());
+            noteObject.put("workoutData", workoutDataPayloadBuilder.build(activity));
 
             // Extract hashtags from user text and add as tags
             List<String> hashtags = extractHashtags(activity);
