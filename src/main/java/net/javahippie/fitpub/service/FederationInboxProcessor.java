@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.entity.FederationInbox;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -38,6 +39,11 @@ public class FederationInboxProcessor {
 
     @Value("${fitpub.activitypub.inbox.retry-delay-seconds:300}")
     private long retryDelaySeconds;
+
+    @Async("taskExecutor")
+    public void triggerAsync(UUID inboxEntryId) {
+        trigger(inboxEntryId);
+    }
 
     public void trigger(UUID inboxEntryId) {
         federationInboxService.claimById(inboxEntryId)

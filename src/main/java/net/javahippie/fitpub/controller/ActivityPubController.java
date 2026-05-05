@@ -236,7 +236,7 @@ public class ActivityPubController {
         }
 
         try {
-            federationInboxProcessor.trigger(inboxEntryId);
+            federationInboxProcessor.triggerAsync(inboxEntryId);
         } catch (Exception e) {
             log.error("Error triggering federation inbox processor for entry {}", inboxEntryId, e);
         }
