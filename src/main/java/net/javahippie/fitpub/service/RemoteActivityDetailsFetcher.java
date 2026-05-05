@@ -23,7 +23,6 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Fetches FitPub-specific remote activity details from the sender's public API.
@@ -39,56 +38,48 @@ public class RemoteActivityDetailsFetcher {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    public Optional<RemoteActivityEnrichment> fetch(String activityUri) {
-        Optional<String> endpoint = deriveApiEndpoint(activityUri);
-        if (endpoint.isEmpty()) {
+    public Optional<RemoteActivityEnrichment> fetch(String fitpubDetailUri) {
+        if (fitpubDetailUri == null || fitpubDetailUri.isBlank()) {
             return Optional.empty();
         }
 
         try {
+            String endpoint = normalizeEndpoint(fitpubDetailUri);
             HttpHeaders headers = new HttpHeaders();
             headers.set("Accept", "application/json");
 
             ResponseEntity<String> response = restTemplate.exchange(
-                endpoint.get(),
+                endpoint,
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
                 String.class
             );
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null || response.getBody().isBlank()) {
-                throw new IllegalStateException("Empty remote activity details response from " + endpoint.get());
+                throw new IllegalStateException("Empty remote activity details response from " + endpoint);
             }
 
             ActivityDTO dto = objectMapper.readValue(response.getBody(), ActivityDTO.class);
             return Optional.of(map(dto));
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode().is4xxClientError()) {
-                log.debug("Remote activity details unavailable via {}: {}", endpoint.get(), e.getStatusCode());
+                log.debug("Remote activity details unavailable via {}: {}", fitpubDetailUri, e.getStatusCode());
                 return Optional.empty();
             }
             throw e;
         } catch (RestClientResponseException | ResourceAccessException e) {
-            throw new RuntimeException("Failed to fetch remote activity details from " + endpoint.get(), e);
+            throw new RuntimeException("Failed to fetch remote activity details from " + fitpubDetailUri, e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse remote activity details from " + endpoint.get(), e);
+            throw new RuntimeException("Failed to parse remote activity details from " + fitpubDetailUri, e);
         }
     }
 
-    private Optional<String> deriveApiEndpoint(String activityUri) {
-        try {
-            URI uri = URI.create(activityUri);
-            String path = uri.getPath();
-            if (path == null || !path.startsWith("/activities/")) {
-                return Optional.empty();
-            }
-
-            String idPart = path.substring("/activities/".length());
-            UUID.fromString(idPart);
-            return Optional.of(uri.getScheme() + "://" + uri.getAuthority() + "/api/activities/" + idPart);
-        } catch (Exception e) {
-            return Optional.empty();
+    private String normalizeEndpoint(String fitpubDetailUri) {
+        URI uri = URI.create(fitpubDetailUri);
+        if (uri.getScheme() == null || uri.getAuthority() == null) {
+            throw new IllegalArgumentException("fitpubDetailUri must be an absolute URI");
         }
+        return fitpubDetailUri;
     }
 
     private RemoteActivityEnrichment map(ActivityDTO dto) {

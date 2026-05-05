@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -117,9 +118,27 @@ public class FederationInboxProcessor {
             return Optional.empty();
         }
 
-        Object id = objectMap.get("id");
-        return id instanceof String activityUri
-            ? remoteActivityDetailsFetcher.fetch(activityUri)
-            : Optional.empty();
+        Object detailUri = objectMap.get("fitpubDetailUri");
+        Object objectId = objectMap.get("id");
+        if (!(detailUri instanceof String fitpubDetailUri) || !(objectId instanceof String activityUri)) {
+            return Optional.empty();
+        }
+        if (!isSameHost(activityUri, fitpubDetailUri)) {
+            log.warn("Ignoring fitpubDetailUri on different host: activityUri={}, fitpubDetailUri={}",
+                activityUri, fitpubDetailUri);
+            return Optional.empty();
+        }
+        return remoteActivityDetailsFetcher.fetch(fitpubDetailUri);
+    }
+
+    private boolean isSameHost(String activityUri, String fitpubDetailUri) {
+        try {
+            URI activity = URI.create(activityUri);
+            URI detail = URI.create(fitpubDetailUri);
+            return activity.getHost() != null
+                && activity.getHost().equalsIgnoreCase(detail.getHost());
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

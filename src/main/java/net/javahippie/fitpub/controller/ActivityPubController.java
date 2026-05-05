@@ -448,6 +448,7 @@ public class ActivityPubController {
         noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
         noteObject.put("content", formatActivityContent(activity));
         noteObject.put("url", activityUri);
+        noteObject.put("fitpubDetailUri", baseUrl + "/api/activities/" + activity.getId());
 
         // Audience — only PUBLIC activities reach this endpoint (the visibility
         // check above returned 403 for anything else), so audience is always

@@ -36,7 +36,6 @@ class RemoteActivityDetailsFetcherTest {
     @Test
     @DisplayName("Should fetch and map FitPub activity details")
     void fetch_ShouldMapActivityDetails() {
-        String activityUri = "https://fitpub.example/activities/123e4567-e89b-12d3-a456-426614174000";
         String endpoint = "https://fitpub.example/api/activities/123e4567-e89b-12d3-a456-426614174000";
         String json = """
             {
@@ -64,7 +63,7 @@ class RemoteActivityDetailsFetcherTest {
         when(restTemplate.exchange(eq(endpoint), eq(HttpMethod.GET), any(), eq(String.class)))
             .thenReturn(new ResponseEntity<>(json, HttpStatus.OK));
 
-        Optional<RemoteActivityEnrichment> enrichment = remoteActivityDetailsFetcher.fetch(activityUri);
+        Optional<RemoteActivityEnrichment> enrichment = remoteActivityDetailsFetcher.fetch(endpoint);
 
         assertThat(enrichment).isPresent();
         assertThat(enrichment.get().activityType()).isEqualTo("RUN");
@@ -83,11 +82,9 @@ class RemoteActivityDetailsFetcherTest {
     }
 
     @Test
-    @DisplayName("Should skip enrichment for non FitPub activity URIs")
-    void fetch_ShouldSkipNonFitPubActivityUriShapes() {
-        Optional<RemoteActivityEnrichment> enrichment =
-            remoteActivityDetailsFetcher.fetch("https://mastodon.example/users/alice/statuses/123");
-
-        assertThat(enrichment).isEmpty();
+    @DisplayName("Should skip enrichment when detail URI is missing")
+    void fetch_ShouldSkipMissingDetailUri() {
+        assertThat(remoteActivityDetailsFetcher.fetch(null)).isEmpty();
+        assertThat(remoteActivityDetailsFetcher.fetch(" ")).isEmpty();
     }
 }

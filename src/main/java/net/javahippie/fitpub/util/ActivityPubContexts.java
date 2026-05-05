@@ -45,7 +45,9 @@ public final class ActivityPubContexts {
      *     "interactionPolicy":  { "@id": "gts:interactionPolicy",  "@type": "@id" },
      *     "canQuote":           { "@id": "gts:canQuote",           "@type": "@id" },
      *     "automaticApproval":  { "@id": "gts:automaticApproval",  "@type": "@id" },
-     *     "manualApproval":     { "@id": "gts:manualApproval",     "@type": "@id" }
+     *     "manualApproval":     { "@id": "gts:manualApproval",     "@type": "@id" },
+     *     "fitpub":             "https://fitpub.social/ns#",
+     *     "fitpubDetailUri":    { "@id": "fitpub:detailUri",       "@type": "@id" }
      *   }
      * ]
      * </pre>
@@ -65,6 +67,8 @@ public final class ActivityPubContexts {
         extensions.put("canQuote",          typedRef("gts:canQuote"));
         extensions.put("automaticApproval", typedRef("gts:automaticApproval"));
         extensions.put("manualApproval",    typedRef("gts:manualApproval"));
+        extensions.put("fitpub", "https://fitpub.social/ns#");
+        extensions.put("fitpubDetailUri",   typedRef("fitpub:detailUri"));
         return List.of(
             "https://www.w3.org/ns/activitystreams",
             extensions
