@@ -9,10 +9,16 @@ import net.javahippie.fitpub.model.entity.ActivityMetrics;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.model.entity.RemoteActivity;
 import net.javahippie.fitpub.model.entity.RemoteActor;
+import org.locationtech.jts.geom.LineString;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * DTO for timeline activity items.
@@ -51,6 +57,7 @@ public class TimelineActivityDTO {
     // Remote activity fields (only populated for federated activities)
     private String activityUri;  // Full ActivityPub URI (for remote activities)
     private String mapImageUrl;  // Map image URL (for remote activities)
+    private Map<String, Object> simplifiedTrack;  // Simplified GeoJSON track for remote activities
 
     // Social interaction counts
     private Long likesCount;
@@ -143,9 +150,26 @@ public class TimelineActivityDTO {
             .isLocal(false)
             .activityUri(remote.getActivityUri())
             .mapImageUrl(remote.getMapImageUrl())
-            .hasGpsTrack(remote.getMapImageUrl() != null)  // Remote activity has GPS if it has a map image
+            .simplifiedTrack(lineStringToGeoJson(remote.getSimplifiedTrack()))
+            .hasGpsTrack(remote.getMapImageUrl() != null || remote.getSimplifiedTrack() != null)
             .metrics(metrics)
             .build();
+    }
+
+    private static Map<String, Object> lineStringToGeoJson(LineString lineString) {
+        if (lineString == null) {
+            return null;
+        }
+
+        Map<String, Object> geoJson = new LinkedHashMap<>();
+        geoJson.put("type", "LineString");
+
+        List<List<Double>> coordinates = Stream.of(lineString.getCoordinates())
+            .map(coord -> List.of(coord.getX(), coord.getY()))
+            .collect(Collectors.toList());
+
+        geoJson.put("coordinates", coordinates);
+        return geoJson;
     }
 
     /**
