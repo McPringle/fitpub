@@ -137,6 +137,7 @@ class ActivityPubControllerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> extensions = (Map<String, Object>) context.get(1);
         assertThat(extensions)
-            .containsKeys("gts", "interactionPolicy", "canQuote", "automaticApproval", "manualApproval");
+            .containsKeys("gts", "interactionPolicy", "canQuote", "automaticApproval", "manualApproval", "fitpub", "fitpubDetailUri");
+        assertThat(response.getBody()).containsEntry("fitpubDetailUri", "https://fitpub.example/api/activities/" + activityId);
     }
 }

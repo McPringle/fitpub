@@ -393,7 +393,7 @@ class FederationFollowFlowIntegrationTest {
             "POST", inboxUrl, body, privateKeyPem, exportingActorUri + "#main-key"
         );
 
-        when(remoteActivityDetailsFetcher.fetch((String) exportedNote.get("id"))).thenReturn(java.util.Optional.of(
+        when(remoteActivityDetailsFetcher.fetch((String) exportedNote.get("fitpubDetailUri"))).thenReturn(java.util.Optional.of(
             RemoteActivityEnrichment.builder()
                 .activityType("RUN")
                 .title("Lunch Run")
@@ -419,6 +419,7 @@ class FederationFollowFlowIntegrationTest {
         assertThat(imported.getActivityUri()).isEqualTo(exportedNote.get("id"));
         assertThat(imported.getRemoteActorUri()).isEqualTo(exportingActorUri);
         assertThat(exportedNote).doesNotContainKey("workoutData");
+        assertThat(exportedNote).containsKey("fitpubDetailUri");
         assertThat(imported.getTitle()).isEqualTo("Lunch Run");
         assertThat(imported.getDescription()).isEqualTo("Sunny run in the city");
         assertThat(imported.getPublishedAt()).isEqualTo(Instant.parse((String) exportedNote.get("published")));

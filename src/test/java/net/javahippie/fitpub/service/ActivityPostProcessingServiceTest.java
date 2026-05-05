@@ -367,5 +367,7 @@ class ActivityPostProcessingServiceTest {
 
         verify(federationService).sendCreateActivity(anyString(), noteCaptor.capture(), eq(testUser), eq(true));
         assertThat(noteCaptor.getValue()).doesNotContainKey("workoutData");
+        assertThat(noteCaptor.getValue())
+            .containsEntry("fitpubDetailUri", "https://test.example/api/activities/" + activityId);
     }
 }

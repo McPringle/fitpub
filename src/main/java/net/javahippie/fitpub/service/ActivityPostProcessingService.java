@@ -203,6 +203,7 @@ public class ActivityPostProcessingService {
             noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
             noteObject.put("content", formatActivityContent(activity));
             noteObject.put("url", baseUrl + "/activities/" + activity.getId());
+            noteObject.put("fitpubDetailUri", baseUrl + "/api/activities/" + activity.getId());
 
             // Extract hashtags from user text and add as tags
             List<String> hashtags = extractHashtags(activity);
