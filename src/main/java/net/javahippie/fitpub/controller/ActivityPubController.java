@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.activitypub.Actor;
 import net.javahippie.fitpub.model.activitypub.OrderedCollection;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.FederationInbox;
 import net.javahippie.fitpub.model.entity.RemoteActor;
 import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.ActivityRepository;
@@ -15,6 +16,7 @@ import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.FederationInboxService;
 import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.InboxProcessor;
 import net.javahippie.fitpub.util.ActivityFormatter;
@@ -51,6 +53,7 @@ public class ActivityPubController {
     private final FollowRepository followRepository;
     private final HttpSignatureValidator signatureValidator;
     private final FederationService federationService;
+    private final FederationInboxService federationInboxService;
     private final ObjectMapper objectMapper;
 
     @Value("${fitpub.base-url}")
@@ -224,13 +227,24 @@ public class ActivityPubController {
         log.info("Received signed ActivityPub activity for user {}: {} from {}",
             username, activity.get("type"), activityActorUri);
 
-        // 8. Hand off to the processor. Errors here are logged but do not affect the
-        // ack we send back to the federated server (per ActivityPub spec, the inbox
-        // returns 202 Accepted once the message is queued for processing).
+        // 8. Persist the validated payload into the durable inbox first. Only after
+        // that do we hand it to the legacy processor. The synchronous processing
+        // path is kept temporarily so current behavior stays intact while the
+        // dedicated queue worker is introduced in the next step.
+        FederationInbox inboxEntry;
+        try {
+            inboxEntry = federationInboxService.enqueue(username, activity);
+        } catch (Exception e) {
+            log.error("Failed to persist inbox activity for durable processing", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+
         try {
             inboxProcessor.processActivity(username, activity);
+            federationInboxService.markDone(inboxEntry.getId());
         } catch (Exception e) {
             log.error("Error processing inbox activity", e);
+            federationInboxService.markError(inboxEntry.getId(), e);
         }
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
