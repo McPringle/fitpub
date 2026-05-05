@@ -388,20 +388,18 @@ class FederationFollowFlowIntegrationTest {
         RemoteActivity imported = remoteActivityRepository.findByActivityUri((String) exportedNote.get("id"))
             .orElseThrow();
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> workoutData = (Map<String, Object>) exportedNote.get("workoutData");
-
         assertThat(imported.getActivityUri()).isEqualTo(exportedNote.get("id"));
         assertThat(imported.getRemoteActorUri()).isEqualTo(exportingActorUri);
+        assertThat(exportedNote).doesNotContainKey("workoutData");
         assertThat(imported.getTitle()).isEqualTo(exportedNote.getOrDefault("name",
             exportedNote.getOrDefault("summary", "Untitled Activity")));
-        assertThat(imported.getDescription()).isEqualTo(workoutData.get("description"));
+        assertThat(imported.getDescription()).contains("Lunch Run");
         assertThat(imported.getPublishedAt()).isEqualTo(Instant.parse((String) exportedNote.get("published")));
         assertThat(imported.getVisibility()).isEqualTo(RemoteActivity.Visibility.PUBLIC);
-        assertThat(imported.getActivityType()).isEqualTo(workoutData.get("activityType"));
-        assertThat(imported.getTotalDistance()).isEqualTo(5000L);
-        assertThat(imported.getTotalDurationSeconds()).isEqualTo(1800L);
-        assertThat(imported.getElevationGain()).isEqualTo(workoutData.get("elevationGain"));
+        assertThat(imported.getActivityType()).isNull();
+        assertThat(imported.getTotalDistance()).isNull();
+        assertThat(imported.getTotalDurationSeconds()).isNull();
+        assertThat(imported.getElevationGain()).isNull();
         assertThat(imported.getAveragePaceSeconds()).isNull();
         assertThat(imported.getAverageHeartRate()).isNull();
         assertThat(imported.getMaxSpeed()).isNull();

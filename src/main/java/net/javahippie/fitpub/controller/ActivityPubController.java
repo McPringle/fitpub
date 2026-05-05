@@ -17,7 +17,6 @@ import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
 import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.InboxProcessor;
-import net.javahippie.fitpub.service.WorkoutDataPayloadBuilder;
 import net.javahippie.fitpub.util.ActivityFormatter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -53,7 +52,6 @@ public class ActivityPubController {
     private final HttpSignatureValidator signatureValidator;
     private final FederationService federationService;
     private final ObjectMapper objectMapper;
-    private final WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -442,7 +440,6 @@ public class ActivityPubController {
         noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
         noteObject.put("content", formatActivityContent(activity));
         noteObject.put("url", activityUri);
-        noteObject.put("workoutData", workoutDataPayloadBuilder.build(activity));
 
         // Audience — only PUBLIC activities reach this endpoint (the visibility
         // check above returned 403 for anything else), so audience is always
