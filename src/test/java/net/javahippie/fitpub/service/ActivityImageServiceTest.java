@@ -27,12 +27,16 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Manual test for ActivityImageService.
  * These tests are disabled by default and should only be run manually.
+ *
+ * To run this test manually:
+ * mvn test -Dtest=ActivityImageServiceTest
  */
 @SpringBootTest(properties = {
         "fitpub.image.osm-tiles.enabled=true"
 })
 @ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
+@Disabled("Manual test - run explicitly when needed")
 class ActivityImageServiceTest {
 
     @Autowired
@@ -55,7 +59,6 @@ class ActivityImageServiceTest {
      * mvn test -Dtest=ActivityImageServiceTest#testGenerateActivityImage_Manual
      */
     @Test
-    @Disabled("Manual test - run explicitly when needed")
     @DisplayName("Generate activity image from test FIT file")
     void testGenerateActivityImage_Manual() throws Exception {
         // Load test FIT file

@@ -98,6 +98,10 @@ public class ActivityFormatter {
      *
      */
     private static LocalDateTime getUtcDateTimeInZone(LocalDateTime utcDateTime, String timezone) {
+        if (timezone == null || timezone.isBlank()) {
+            return utcDateTime;
+        }
+
         try {
             return utcDateTime.atZone(ZoneOffset.UTC)
                     .withZoneSameInstant(ZoneId.of(timezone))
