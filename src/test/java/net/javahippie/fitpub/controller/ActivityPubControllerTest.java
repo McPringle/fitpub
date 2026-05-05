@@ -8,9 +8,9 @@ import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.FederationInboxProcessor;
+import net.javahippie.fitpub.service.FederationInboxService;
 import net.javahippie.fitpub.service.FederationService;
-import net.javahippie.fitpub.service.InboxProcessor;
-import net.javahippie.fitpub.service.WorkoutDataPayloadBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,9 +47,6 @@ class ActivityPubControllerTest {
     private ActivityImageService activityImageService;
 
     @Mock
-    private InboxProcessor inboxProcessor;
-
-    @Mock
     private FollowRepository followRepository;
 
     @Mock
@@ -59,10 +56,13 @@ class ActivityPubControllerTest {
     private FederationService federationService;
 
     @Mock
-    private ObjectMapper objectMapper;
+    private FederationInboxService federationInboxService;
 
     @Mock
-    private WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
+    private FederationInboxProcessor federationInboxProcessor;
+
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private ActivityPubController controller;
@@ -118,38 +118,17 @@ class ActivityPubControllerTest {
     }
 
     @Test
-    @DisplayName("Should include workoutData and FitPub context terms in activity note")
-    void getActivity_ShouldIncludeWorkoutDataAndExtendedContext() {
+    @DisplayName("Should omit proprietary payload and only expose interaction-policy context terms")
+    void getActivity_ShouldOmitWorkoutDataAndKeepExtendedContext() {
         when(activityRepository.findById(activityId)).thenReturn(Optional.of(activity));
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(activityImageService.getActivityImageFile(activityId)).thenReturn(new File("/definitely/nonexistent-fitpub-test-image"));
-        when(workoutDataPayloadBuilder.build(activity)).thenReturn(Map.of(
-            "activityType", "RUN",
-            "description", "Sunny run",
-            "distance", 5000L,
-            "duration", "PT30M",
-            "averagePace", "PT6M",
-            "route", Map.of(
-                "type", "FeatureCollection",
-                "features", List.of()
-            )
-        ));
 
         ResponseEntity<Map<String, Object>> response = controller.getActivity(activityId);
 
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().get("workoutData")).isEqualTo(Map.of(
-            "activityType", "RUN",
-            "description", "Sunny run",
-            "distance", 5000L,
-            "duration", "PT30M",
-            "averagePace", "PT6M",
-            "route", Map.of(
-                "type", "FeatureCollection",
-                "features", List.of()
-            )
-        ));
+        assertThat(response.getBody()).doesNotContainKey("workoutData");
 
         @SuppressWarnings("unchecked")
         List<Object> context = (List<Object>) response.getBody().get("@context");
@@ -158,8 +137,6 @@ class ActivityPubControllerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> extensions = (Map<String, Object>) context.get(1);
         assertThat(extensions)
-            .containsEntry("fitpub", "https://fitpub.social/ns#")
-            .containsEntry("workoutData", "fitpub:workoutData")
-            .containsEntry("route", "fitpub:route");
+            .containsKeys("gts", "interactionPolicy", "canQuote", "automaticApproval", "manualApproval");
     }
 }

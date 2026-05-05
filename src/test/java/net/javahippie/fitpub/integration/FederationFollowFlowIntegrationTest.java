@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.javahippie.fitpub.config.TestcontainersConfiguration;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.RemoteActivityDetailsFetcher;
+import net.javahippie.fitpub.service.RemoteActivityEnrichment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
@@ -24,9 +26,12 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -44,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -59,6 +65,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 @Import(TestcontainersConfiguration.class)
 class FederationFollowFlowIntegrationTest {
+
+    @TestConfiguration
+    static class AsyncTestConfiguration {
+        @Bean(name = "taskExecutor")
+        Executor taskExecutor() {
+            return new SyncTaskExecutor();
+        }
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -92,6 +106,9 @@ class FederationFollowFlowIntegrationTest {
 
     @MockBean
     private ActivityImageService activityImageService;
+
+    @MockBean
+    private RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -376,6 +393,17 @@ class FederationFollowFlowIntegrationTest {
             "POST", inboxUrl, body, privateKeyPem, exportingActorUri + "#main-key"
         );
 
+        when(remoteActivityDetailsFetcher.fetch((String) exportedNote.get("id"))).thenReturn(java.util.Optional.of(
+            RemoteActivityEnrichment.builder()
+                .activityType("RUN")
+                .title("Lunch Run")
+                .description("Sunny run in the city")
+                .totalDistance(5000L)
+                .totalDurationSeconds(1800L)
+                .elevationGain(100)
+                .build()
+        ));
+
         mockMvc.perform(post(inboxPath)
                 .contentType("application/activity+json")
                 .header("Host", sigHeaders.host)
@@ -388,20 +416,17 @@ class FederationFollowFlowIntegrationTest {
         RemoteActivity imported = remoteActivityRepository.findByActivityUri((String) exportedNote.get("id"))
             .orElseThrow();
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> workoutData = (Map<String, Object>) exportedNote.get("workoutData");
-
         assertThat(imported.getActivityUri()).isEqualTo(exportedNote.get("id"));
         assertThat(imported.getRemoteActorUri()).isEqualTo(exportingActorUri);
-        assertThat(imported.getTitle()).isEqualTo(exportedNote.getOrDefault("name",
-            exportedNote.getOrDefault("summary", "Untitled Activity")));
-        assertThat(imported.getDescription()).isEqualTo(workoutData.get("description"));
+        assertThat(exportedNote).doesNotContainKey("workoutData");
+        assertThat(imported.getTitle()).isEqualTo("Lunch Run");
+        assertThat(imported.getDescription()).isEqualTo("Sunny run in the city");
         assertThat(imported.getPublishedAt()).isEqualTo(Instant.parse((String) exportedNote.get("published")));
         assertThat(imported.getVisibility()).isEqualTo(RemoteActivity.Visibility.PUBLIC);
-        assertThat(imported.getActivityType()).isEqualTo(workoutData.get("activityType"));
+        assertThat(imported.getActivityType()).isEqualTo("RUN");
         assertThat(imported.getTotalDistance()).isEqualTo(5000L);
         assertThat(imported.getTotalDurationSeconds()).isEqualTo(1800L);
-        assertThat(imported.getElevationGain()).isEqualTo(workoutData.get("elevationGain"));
+        assertThat(imported.getElevationGain()).isEqualTo(100);
         assertThat(imported.getAveragePaceSeconds()).isNull();
         assertThat(imported.getAverageHeartRate()).isNull();
         assertThat(imported.getMaxSpeed()).isNull();

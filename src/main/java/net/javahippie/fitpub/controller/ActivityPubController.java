@@ -15,9 +15,9 @@ import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.FederationInboxProcessor;
+import net.javahippie.fitpub.service.FederationInboxService;
 import net.javahippie.fitpub.service.FederationService;
-import net.javahippie.fitpub.service.InboxProcessor;
-import net.javahippie.fitpub.service.WorkoutDataPayloadBuilder;
 import net.javahippie.fitpub.util.ActivityFormatter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -48,12 +48,12 @@ public class ActivityPubController {
     private final UserRepository userRepository;
     private final ActivityRepository activityRepository;
     private final ActivityImageService activityImageService;
-    private final InboxProcessor inboxProcessor;
     private final FollowRepository followRepository;
     private final HttpSignatureValidator signatureValidator;
     private final FederationService federationService;
+    private final FederationInboxService federationInboxService;
+    private final FederationInboxProcessor federationInboxProcessor;
     private final ObjectMapper objectMapper;
-    private final WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -226,13 +226,19 @@ public class ActivityPubController {
         log.info("Received signed ActivityPub activity for user {}: {} from {}",
             username, activity.get("type"), activityActorUri);
 
-        // 8. Hand off to the processor. Errors here are logged but do not affect the
-        // ack we send back to the federated server (per ActivityPub spec, the inbox
-        // returns 202 Accepted once the message is queued for processing).
+        // 8. Persist the validated payload into the durable inbox.
+        UUID inboxEntryId;
         try {
-            inboxProcessor.processActivity(username, activity);
+            inboxEntryId = federationInboxService.enqueue(username, activity).getId();
         } catch (Exception e) {
-            log.error("Error processing inbox activity", e);
+            log.error("Failed to persist inbox activity for durable processing", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+
+        try {
+            federationInboxProcessor.triggerAsync(inboxEntryId);
+        } catch (Exception e) {
+            log.error("Error triggering federation inbox processor for entry {}", inboxEntryId, e);
         }
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).build();
@@ -442,7 +448,6 @@ public class ActivityPubController {
         noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
         noteObject.put("content", formatActivityContent(activity));
         noteObject.put("url", activityUri);
-        noteObject.put("workoutData", workoutDataPayloadBuilder.build(activity));
 
         // Audience — only PUBLIC activities reach this endpoint (the visibility
         // check above returned 403 for anything else), so audience is always

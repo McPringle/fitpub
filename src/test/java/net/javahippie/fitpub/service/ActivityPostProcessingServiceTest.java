@@ -1,7 +1,6 @@
 package net.javahippie.fitpub.service;
 
 import net.javahippie.fitpub.model.entity.Activity;
-import net.javahippie.fitpub.model.entity.ActivityMetrics;
 import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.ActivityRepository;
 import net.javahippie.fitpub.repository.UserRepository;
@@ -9,8 +8,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.GeometryFactory;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -66,9 +63,6 @@ class ActivityPostProcessingServiceTest {
     @Mock
     private UserRepository userRepository;
 
-    @Mock
-    private WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
-
     @InjectMocks
     private ActivityPostProcessingService service;
 
@@ -100,37 +94,7 @@ class ActivityPostProcessingServiceTest {
             .elevationGain(BigDecimal.valueOf(100))
             .startedAt(createdAt.minusMinutes(30))
             .createdAt(createdAt)
-            .simplifiedTrack(new GeometryFactory().createLineString(new Coordinate[]{
-                new Coordinate(8.55, 47.37),
-                new Coordinate(8.56, 47.38)
-            }))
             .build();
-        testActivity.setMetrics(ActivityMetrics.builder()
-            .averagePaceSeconds(321L)
-            .build());
-        Map<String, Object> workoutData = new HashMap<>();
-        workoutData.put("activityType", "RUN");
-        workoutData.put("description", "Morning jog");
-        workoutData.put("distance", 5000L);
-        workoutData.put("duration", "PT30M");
-        workoutData.put("averagePace", "PT5M21S");
-        workoutData.put("elevationGain", 100);
-        workoutData.put("route", Map.of(
-            "type", "FeatureCollection",
-            "features", List.of(
-                Map.of(
-                    "type", "Feature",
-                    "geometry", Map.of(
-                        "type", "LineString",
-                        "coordinates", List.of(
-                            List.of(8.55, 47.37),
-                            List.of(8.56, 47.38)
-                        )
-                    )
-                )
-            )
-        ));
-        lenient().when(workoutDataPayloadBuilder.build(testActivity)).thenReturn(workoutData);
 
         // Create test user
         testUser = User.builder()
@@ -389,8 +353,8 @@ class ActivityPostProcessingServiceTest {
     }
 
     @Test
-    @DisplayName("Should include workoutData payload in federation note")
-    void testPublishToFederationAsync_IncludesWorkoutDataPayload() {
+    @DisplayName("Should omit workoutData payload in federation note")
+    void testPublishToFederationAsync_OmitsWorkoutDataPayload() {
         when(activityRepository.findById(activityId)).thenReturn(Optional.of(testActivity));
         when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
         when(activityImageService.generateActivityImage(testActivity)).thenReturn(null);
@@ -402,32 +366,6 @@ class ActivityPostProcessingServiceTest {
         service.publishToFederationAsync(activityId, userId);
 
         verify(federationService).sendCreateActivity(anyString(), noteCaptor.capture(), eq(testUser), eq(true));
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> workoutData = (Map<String, Object>) noteCaptor.getValue().get("workoutData");
-        assertThat(workoutData)
-            .containsEntry("activityType", "RUN")
-            .containsEntry("description", "Morning jog")
-            .containsEntry("distance", 5000L)
-            .containsEntry("duration", "PT30M")
-            .containsEntry("averagePace", "PT5M21S")
-            .containsEntry("elevationGain", 100);
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> route = (Map<String, Object>) workoutData.get("route");
-        assertThat(route).containsEntry("type", "FeatureCollection");
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> features = (List<Map<String, Object>>) route.get("features");
-        assertThat(features).hasSize(1);
-        assertThat(features.get(0)).containsEntry("type", "Feature");
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> geometry = (Map<String, Object>) features.get(0).get("geometry");
-        assertThat(geometry).containsEntry("type", "LineString");
-        assertThat(geometry.get("coordinates")).isEqualTo(List.of(
-            List.of(8.55, 47.37),
-            List.of(8.56, 47.38)
-        ));
+        assertThat(noteCaptor.getValue()).doesNotContainKey("workoutData");
     }
 }
