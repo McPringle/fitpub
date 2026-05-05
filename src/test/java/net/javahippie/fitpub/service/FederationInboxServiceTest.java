@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,8 +73,8 @@ class FederationInboxServiceTest {
     }
 
     @Test
-    @DisplayName("Should mark inbox entry as done")
-    void markDone_ShouldSetDoneStatusAndProcessedAt() {
+    @DisplayName("Should claim due pending entry for processing")
+    void claimById_ShouldSetProcessingStateAndIncrementAttempts() {
         UUID id = UUID.randomUUID();
         FederationInbox entry = FederationInbox.builder()
             .id(id)
@@ -84,12 +85,85 @@ class FederationInboxServiceTest {
             .nextAttemptAt(LocalDateTime.now())
             .build();
 
-        when(federationInboxRepository.findById(id)).thenReturn(java.util.Optional.of(entry));
+        when(federationInboxRepository.findByIdForUpdate(id)).thenReturn(Optional.of(entry));
+        when(federationInboxRepository.save(entry)).thenReturn(entry);
+
+        Optional<FederationInbox> claimed = federationInboxService.claimById(id);
+
+        assertThat(claimed).contains(entry);
+        assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.PROCESSING);
+        assertThat(entry.getAttemptCount()).isEqualTo(1);
+        assertThat(entry.getProcessingStartedAt()).isNotNull();
+        assertThat(entry.getProcessedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("Should mark inbox entry as done")
+    void markDone_ShouldSetDoneStatusAndProcessedAt() {
+        UUID id = UUID.randomUUID();
+        FederationInbox entry = FederationInbox.builder()
+            .id(id)
+            .recipientUsername("janedoe")
+            .activityType("Create")
+            .payloadJson("{}")
+            .status(FederationInbox.Status.PROCESSING)
+            .attemptCount(1)
+            .nextAttemptAt(LocalDateTime.now())
+            .build();
+
+        when(federationInboxRepository.findByIdForUpdate(id)).thenReturn(Optional.of(entry));
 
         federationInboxService.markDone(id);
 
         assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.DONE);
         assertThat(entry.getProcessedAt()).isNotNull();
         assertThat(entry.getLastError()).isNull();
+    }
+
+    @Test
+    @DisplayName("Should requeue failed entry below max attempts")
+    void markForRetry_ShouldRequeuePendingEntry() {
+        UUID id = UUID.randomUUID();
+        FederationInbox entry = FederationInbox.builder()
+            .id(id)
+            .recipientUsername("janedoe")
+            .activityType("Create")
+            .payloadJson("{}")
+            .status(FederationInbox.Status.PROCESSING)
+            .attemptCount(2)
+            .nextAttemptAt(LocalDateTime.now())
+            .build();
+        LocalDateTime retryAt = LocalDateTime.now().plusMinutes(5);
+
+        when(federationInboxRepository.findByIdForUpdate(id)).thenReturn(Optional.of(entry));
+
+        federationInboxService.markForRetry(id, new RuntimeException("temporary"), 10, retryAt);
+
+        assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.PENDING);
+        assertThat(entry.getNextAttemptAt()).isEqualTo(retryAt);
+        assertThat(entry.getLastError()).isEqualTo("temporary");
+        assertThat(entry.getProcessingStartedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("Should mark failed entry as error after max attempts")
+    void markForRetry_ShouldMarkErrorAtMaxAttempts() {
+        UUID id = UUID.randomUUID();
+        FederationInbox entry = FederationInbox.builder()
+            .id(id)
+            .recipientUsername("janedoe")
+            .activityType("Create")
+            .payloadJson("{}")
+            .status(FederationInbox.Status.PROCESSING)
+            .attemptCount(10)
+            .nextAttemptAt(LocalDateTime.now())
+            .build();
+
+        when(federationInboxRepository.findByIdForUpdate(id)).thenReturn(Optional.of(entry));
+
+        federationInboxService.markForRetry(id, new RuntimeException("boom"), 10, LocalDateTime.now().plusMinutes(5));
+
+        assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.ERROR);
+        assertThat(entry.getLastError()).isEqualTo("boom");
     }
 }

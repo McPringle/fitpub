@@ -8,9 +8,9 @@ import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.FederationInboxProcessor;
 import net.javahippie.fitpub.service.FederationInboxService;
 import net.javahippie.fitpub.service.FederationService;
-import net.javahippie.fitpub.service.InboxProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,9 +47,6 @@ class ActivityPubControllerTest {
     private ActivityImageService activityImageService;
 
     @Mock
-    private InboxProcessor inboxProcessor;
-
-    @Mock
     private FollowRepository followRepository;
 
     @Mock
@@ -60,6 +57,9 @@ class ActivityPubControllerTest {
 
     @Mock
     private FederationInboxService federationInboxService;
+
+    @Mock
+    private FederationInboxProcessor federationInboxProcessor;
 
     @Mock
     private ObjectMapper objectMapper;

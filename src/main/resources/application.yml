@@ -64,6 +64,11 @@ fitpub:
     enabled: true
     max-federation-retries: 3
     request-timeout-seconds: 30
+    inbox:
+      processing-interval-ms: ${FITPUB_ACTIVITYPUB_INBOX_PROCESSING_INTERVAL_MS:300000}
+      batch-size: ${FITPUB_ACTIVITYPUB_INBOX_BATCH_SIZE:20}
+      retry-delay-seconds: ${FITPUB_ACTIVITYPUB_INBOX_RETRY_DELAY_SECONDS:300}
+      max-attempts: ${FITPUB_ACTIVITYPUB_INBOX_MAX_ATTEMPTS:10}
     # Allow connections to private IPs (for local testing only - disable in production!)
     allow-private-ips: ${FITPUB_ALLOW_PRIVATE_IPS:false}
     # Federation protocol (http or https) - use http for local testing, https for production

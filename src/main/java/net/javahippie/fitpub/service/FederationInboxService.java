@@ -5,11 +5,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.entity.FederationInbox;
 import net.javahippie.fitpub.repository.FederationInboxRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -40,8 +43,35 @@ public class FederationInboxService {
     }
 
     @Transactional
+    public Optional<FederationInbox> claimById(UUID id) {
+        LocalDateTime now = LocalDateTime.now();
+        return federationInboxRepository.findByIdForUpdate(id)
+            .filter(entry -> entry.getStatus() == FederationInbox.Status.PENDING)
+            .filter(entry -> !entry.getNextAttemptAt().isAfter(now))
+            .map(entry -> {
+                entry.setStatus(FederationInbox.Status.PROCESSING);
+                entry.setProcessingStartedAt(now);
+                entry.setAttemptCount(entry.getAttemptCount() + 1);
+                entry.setLastError(null);
+                entry.setProcessedAt(null);
+                return federationInboxRepository.save(entry);
+            });
+    }
+
+    @Transactional(readOnly = true)
+    public List<UUID> findDueEntryIds(int limit) {
+        return federationInboxRepository.findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscReceivedAtAsc(
+                FederationInbox.Status.PENDING,
+                LocalDateTime.now(),
+                PageRequest.of(0, limit))
+            .stream()
+            .map(FederationInbox::getId)
+            .toList();
+    }
+
+    @Transactional
     public void markDone(UUID id) {
-        federationInboxRepository.findById(id).ifPresent(entry -> {
+        federationInboxRepository.findByIdForUpdate(id).ifPresent(entry -> {
             entry.setStatus(FederationInbox.Status.DONE);
             entry.setProcessedAt(LocalDateTime.now());
             entry.setLastError(null);
@@ -50,10 +80,17 @@ public class FederationInboxService {
     }
 
     @Transactional
-    public void markError(UUID id, Exception error) {
-        federationInboxRepository.findById(id).ifPresent(entry -> {
-            entry.setStatus(FederationInbox.Status.ERROR);
+    public void markForRetry(UUID id, Exception error, int maxAttempts, LocalDateTime nextAttemptAt) {
+        federationInboxRepository.findByIdForUpdate(id).ifPresent(entry -> {
             entry.setLastError(truncateError(error));
+            entry.setProcessingStartedAt(null);
+            entry.setProcessedAt(null);
+            if (entry.getAttemptCount() >= maxAttempts) {
+                entry.setStatus(FederationInbox.Status.ERROR);
+            } else {
+                entry.setStatus(FederationInbox.Status.PENDING);
+                entry.setNextAttemptAt(nextAttemptAt);
+            }
             federationInboxRepository.save(entry);
         });
     }
