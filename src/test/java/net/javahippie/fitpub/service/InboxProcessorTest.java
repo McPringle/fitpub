@@ -11,7 +11,6 @@ import net.javahippie.fitpub.repository.LikeRepository;
 import net.javahippie.fitpub.repository.RemoteActivityRepository;
 import net.javahippie.fitpub.repository.RemoteActorRepository;
 import net.javahippie.fitpub.repository.UserRepository;
-import org.locationtech.jts.geom.LineString;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -135,8 +134,8 @@ class InboxProcessorTest {
     }
 
     @Test
-    @DisplayName("Should prefer workoutData fields over legacy content parsing")
-    void processCreateRemoteActivity_WithWorkoutDataPayload_ShouldPreferWorkoutDataFields() {
+    @DisplayName("Should ignore workoutData payload and persist only note-derived fields")
+    void processCreateRemoteActivity_WithWorkoutDataPayload_ShouldIgnoreWorkoutDataFields() {
         when(remoteActivityRepository.existsByActivityUri("https://fitpub.example.com/activities/456"))
             .thenReturn(false);
         when(federationService.fetchRemoteActor(remoteActorUri)).thenReturn(RemoteActor.builder()
@@ -201,17 +200,13 @@ class InboxProcessorTest {
 
         RemoteActivity remoteActivity = remoteActivityCaptor.getValue();
         assertThat(remoteActivity.getTitle()).isEqualTo("Kraremanns Lauf 2026");
-        assertThat(remoteActivity.getDescription()).isEqualTo("Direct workoutData description");
+        assertThat(remoteActivity.getDescription()).contains("Kraremanns Lauf 2026");
+        assertThat(remoteActivity.getDescription()).contains("Legacy content fallback");
         assertThat(remoteActivity.getActivityType()).isEqualTo("RUN");
-        assertThat(remoteActivity.getTotalDistance()).isEqualTo(9800L);
-        assertThat(remoteActivity.getTotalDurationSeconds()).isEqualTo(2469L);
-        assertThat(remoteActivity.getAveragePaceSeconds()).isEqualTo(252L);
-        assertThat(remoteActivity.getElevationGain()).isEqualTo(123);
-        LineString simplifiedTrack = remoteActivity.getSimplifiedTrack();
-        assertThat(simplifiedTrack).isNotNull();
-        assertThat(simplifiedTrack.getNumPoints()).isEqualTo(3);
-        assertThat(simplifiedTrack.getSRID()).isEqualTo(4326);
-        assertThat(simplifiedTrack.getCoordinateN(0).x).isEqualTo(8.55);
-        assertThat(simplifiedTrack.getCoordinateN(0).y).isEqualTo(47.37);
+        assertThat(remoteActivity.getTotalDistance()).isNull();
+        assertThat(remoteActivity.getTotalDurationSeconds()).isNull();
+        assertThat(remoteActivity.getAveragePaceSeconds()).isNull();
+        assertThat(remoteActivity.getElevationGain()).isNull();
+        assertThat(remoteActivity.getSimplifiedTrack()).isNull();
     }
 }

@@ -16,10 +16,6 @@ import net.javahippie.fitpub.repository.CommentRepository;
 import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.LikeRepository;
 import net.javahippie.fitpub.repository.UserRepository;
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.GeometryFactory;
-import org.locationtech.jts.geom.LineString;
-import org.locationtech.jts.geom.PrecisionModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,10 +36,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class InboxProcessor {
-    private static final int GEOMETRY_SRID = 4326;
-    private static final GeometryFactory GEOMETRY_FACTORY =
-        new GeometryFactory(new PrecisionModel(), GEOMETRY_SRID);
-
     private final UserRepository userRepository;
     private final FollowRepository followRepository;
     private final FederationService federationService;
@@ -416,8 +408,6 @@ public class InboxProcessor {
                 return;
             }
 
-            // Extract workout metadata
-            Map<String, Object> workoutData = extractWorkoutData(noteObject);
             Map<String, String> attachments = extractAttachments(noteObject);
             RemoteActivity.Visibility visibility = determineVisibility(noteObject);
 
@@ -429,24 +419,23 @@ public class InboxProcessor {
             RemoteActivity remoteActivity = RemoteActivity.builder()
                 .activityUri(activityUri)
                 .remoteActorUri(actor)
-                .activityType(stringValue(workoutData.get("activityType")))
-                .title((String) noteObject.getOrDefault("name", noteObject.getOrDefault("summary", "Untitled Activity")))
-                .description(firstNonBlank(
-                    stringValue(workoutData.get("description")),
-                    stripHtml((String) noteObject.get("content"))
+                .activityType(guessActivityType(
+                    stringValue(noteObject.getOrDefault("summary", noteObject.get("content")))
                 ))
+                .title((String) noteObject.getOrDefault("name", noteObject.getOrDefault("summary", "Untitled Activity")))
+                .description(stripHtml((String) noteObject.get("content")))
                 .publishedAt(publishedAt)
-                .totalDistance(parseLong(workoutData.get("distance")))
-                .totalDurationSeconds(parseDurationSeconds((String) workoutData.get("duration")))
-                .elevationGain(parseInteger(workoutData.get("elevationGain")))
-                .averagePaceSeconds(parseDurationSeconds((String) workoutData.get("averagePace")))
-                .averageHeartRate(parseInteger(workoutData.get("averageHeartRate")))
-                .maxSpeed(parseDouble(workoutData.get("maxSpeed")))
-                .averageSpeed(parseDouble(workoutData.get("averageSpeed")))
-                .calories(parseInteger(workoutData.get("calories")))
+                .totalDistance(null)
+                .totalDurationSeconds(null)
+                .elevationGain(null)
+                .averagePaceSeconds(null)
+                .averageHeartRate(null)
+                .maxSpeed(null)
+                .averageSpeed(null)
+                .calories(null)
                 .mapImageUrl(attachments.get("mapImage"))
                 .trackGeojsonUrl(attachments.get("trackGeojson"))
-                .simplifiedTrack(extractRoute(workoutData))
+                .simplifiedTrack(null)
                 .visibility(visibility)
                 .activityPubObject(serializeToJson(noteObject))
                 .build();
@@ -696,111 +685,8 @@ public class InboxProcessor {
 
     // ==================== Remote Activity Helper Methods ====================
 
-    /**
-     * Extract workout/fitness data from a Note object.
-     * Looks for a "workoutData" extension field containing structured fitness metrics.
-     */
-    private Map<String, Object> extractWorkoutData(Map<String, Object> noteObject) {
-        Map<String, Object> workoutData = new java.util.HashMap<>();
-
-        // Check for custom workoutData extension (FitPub-specific)
-        Object workoutDataObj = noteObject.get("workoutData");
-        if (workoutDataObj instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> data = (Map<String, Object>) workoutDataObj;
-            workoutData.putAll(data);
-        }
-
-        // Fallback: Try to extract from summary or content
-        String summary = (String) noteObject.get("summary");
-        if (summary != null) {
-            // Parse summary like "10.2 km • 48:23 • 4:44/km pace"
-            workoutData.putIfAbsent("activityType", guessActivityType(summary));
-        }
-
-        return workoutData;
-    }
-
     private String stringValue(Object value) {
         return value != null ? String.valueOf(value) : null;
-    }
-
-    private LineString extractRoute(Map<String, Object> workoutData) {
-        Object routeObj = workoutData.get("route");
-        if (!(routeObj instanceof Map<?, ?> routeMap)) {
-            return null;
-        }
-
-        Object featuresObj = routeMap.get("features");
-        if (!(featuresObj instanceof java.util.List<?> features) || features.isEmpty()) {
-            return null;
-        }
-
-        for (Object featureObj : features) {
-            if (!(featureObj instanceof Map<?, ?> featureMap)) {
-                continue;
-            }
-
-            Object geometryObj = featureMap.get("geometry");
-            if (!(geometryObj instanceof Map<?, ?> geometryMap)) {
-                continue;
-            }
-
-            if (!"LineString".equals(geometryMap.get("type"))) {
-                continue;
-            }
-
-            LineString lineString = parseLineStringCoordinates(geometryMap.get("coordinates"));
-            if (lineString != null) {
-                return lineString;
-            }
-        }
-
-        return null;
-    }
-
-    private LineString parseLineStringCoordinates(Object coordinatesObj) {
-        if (!(coordinatesObj instanceof java.util.List<?> coordinateList) || coordinateList.size() < 2) {
-            return null;
-        }
-
-        java.util.List<Coordinate> coordinates = new java.util.ArrayList<>();
-        for (Object coordinateObj : coordinateList) {
-            Coordinate coordinate = parseCoordinate(coordinateObj);
-            if (coordinate == null) {
-                return null;
-            }
-            coordinates.add(coordinate);
-        }
-
-        if (coordinates.size() < 2) {
-            return null;
-        }
-
-        return GEOMETRY_FACTORY.createLineString(coordinates.toArray(new Coordinate[0]));
-    }
-
-    private Coordinate parseCoordinate(Object coordinateObj) {
-        if (!(coordinateObj instanceof java.util.List<?> coordinateValues) || coordinateValues.size() < 2) {
-            return null;
-        }
-
-        Double longitude = parseDouble(coordinateValues.get(0));
-        Double latitude = parseDouble(coordinateValues.get(1));
-        if (longitude == null || latitude == null) {
-            return null;
-        }
-
-        return new Coordinate(longitude, latitude);
-    }
-
-    private String firstNonBlank(String... values) {
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                return value;
-            }
-        }
-        return null;
     }
 
     /**
@@ -875,51 +761,6 @@ public class InboxProcessor {
 
         // Default to PRIVATE
         return RemoteActivity.Visibility.PRIVATE;
-    }
-
-    /**
-     * Parse ISO 8601 duration string (PT48M23S) to seconds.
-     */
-    private Long parseDurationSeconds(String isoDuration) {
-        if (isoDuration == null || isoDuration.isBlank()) {
-            return null;
-        }
-
-        try {
-            // Simple ISO 8601 duration parser for PT format
-            // Format: PT<hours>H<minutes>M<seconds>S
-            if (!isoDuration.startsWith("PT")) {
-                return null;
-            }
-
-            String duration = isoDuration.substring(2); // Remove "PT"
-            long totalSeconds = 0;
-
-            // Parse hours
-            if (duration.contains("H")) {
-                int hIndex = duration.indexOf("H");
-                totalSeconds += Long.parseLong(duration.substring(0, hIndex)) * 3600;
-                duration = duration.substring(hIndex + 1);
-            }
-
-            // Parse minutes
-            if (duration.contains("M")) {
-                int mIndex = duration.indexOf("M");
-                totalSeconds += Long.parseLong(duration.substring(0, mIndex)) * 60;
-                duration = duration.substring(mIndex + 1);
-            }
-
-            // Parse seconds
-            if (duration.contains("S")) {
-                int sIndex = duration.indexOf("S");
-                totalSeconds += Long.parseLong(duration.substring(0, sIndex));
-            }
-
-            return totalSeconds;
-        } catch (Exception e) {
-            log.warn("Failed to parse ISO duration: {}", isoDuration, e);
-            return null;
-        }
     }
 
     /**
@@ -1008,51 +849,4 @@ public class InboxProcessor {
         return "UNKNOWN";
     }
 
-    /**
-     * Parse Long from object.
-     */
-    private Long parseLong(Object obj) {
-        if (obj == null) return null;
-        if (obj instanceof Number) return ((Number) obj).longValue();
-        if (obj instanceof String) {
-            try {
-                return Long.parseLong((String) obj);
-            } catch (NumberFormatException e) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Parse Integer from object.
-     */
-    private Integer parseInteger(Object obj) {
-        if (obj == null) return null;
-        if (obj instanceof Number) return ((Number) obj).intValue();
-        if (obj instanceof String) {
-            try {
-                return Integer.parseInt((String) obj);
-            } catch (NumberFormatException e) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Parse Double from object.
-     */
-    private Double parseDouble(Object obj) {
-        if (obj == null) return null;
-        if (obj instanceof Number) return ((Number) obj).doubleValue();
-        if (obj instanceof String) {
-            try {
-                return Double.parseDouble((String) obj);
-            } catch (NumberFormatException e) {
-                return null;
-            }
-        }
-        return null;
-    }
 }

@@ -396,7 +396,7 @@ class FederationFollowFlowIntegrationTest {
         assertThat(imported.getDescription()).contains("Lunch Run");
         assertThat(imported.getPublishedAt()).isEqualTo(Instant.parse((String) exportedNote.get("published")));
         assertThat(imported.getVisibility()).isEqualTo(RemoteActivity.Visibility.PUBLIC);
-        assertThat(imported.getActivityType()).isNull();
+        assertThat(imported.getActivityType()).isEqualTo("RUN");
         assertThat(imported.getTotalDistance()).isNull();
         assertThat(imported.getTotalDurationSeconds()).isNull();
         assertThat(imported.getElevationGain()).isNull();
