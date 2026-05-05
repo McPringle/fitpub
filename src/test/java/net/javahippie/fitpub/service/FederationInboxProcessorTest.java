@@ -34,6 +34,9 @@ class FederationInboxProcessorTest {
     private InboxProcessor inboxProcessor;
 
     @Mock
+    private RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
+
+    @Mock
     private ObjectMapper objectMapper;
 
     @InjectMocks
@@ -65,16 +68,26 @@ class FederationInboxProcessorTest {
     void trigger_ShouldProcessClaimedEntry() throws Exception {
         Map<String, Object> payload = Map.of(
             "type", "Create",
-            "actor", "https://remote.example/users/alice"
+            "actor", "https://remote.example/users/alice",
+            "object", Map.of(
+                "id", "https://remote.example/activities/123e4567-e89b-12d3-a456-426614174000",
+                "type", "Note"
+            )
         );
+        RemoteActivityEnrichment enrichment = RemoteActivityEnrichment.builder()
+            .activityType("RUN")
+            .title("Lunch Run")
+            .build();
 
         when(federationInboxService.claimById(entryId)).thenReturn(Optional.of(entry));
         when(objectMapper.readValue(eq(entry.getPayloadJson()), any(com.fasterxml.jackson.core.type.TypeReference.class)))
             .thenReturn(payload);
+        when(remoteActivityDetailsFetcher.fetch("https://remote.example/activities/123e4567-e89b-12d3-a456-426614174000"))
+            .thenReturn(Optional.of(enrichment));
 
         federationInboxProcessor.trigger(entryId);
 
-        verify(inboxProcessor).processActivity("janedoe", payload);
+        verify(inboxProcessor).processActivity("janedoe", payload, enrichment);
         verify(federationInboxService).markDone(entryId);
     }
 

@@ -57,6 +57,11 @@ public class InboxProcessor {
      */
     @Transactional
     public void processActivity(String username, Map<String, Object> activity) {
+        processActivity(username, activity, null);
+    }
+
+    @Transactional
+    public void processActivity(String username, Map<String, Object> activity, RemoteActivityEnrichment enrichment) {
         String type = (String) activity.get("type");
         log.info("Processing {} activity for user {}", type, username);
 
@@ -71,7 +76,7 @@ public class InboxProcessor {
                 processAccept(username, activity);
                 break;
             case "Create":
-                processCreate(username, activity);
+                processCreate(username, activity, enrichment);
                 break;
             case "Like":
                 processLike(username, activity);
@@ -223,7 +228,7 @@ public class InboxProcessor {
     /**
      * Process a Create activity (e.g., new post, comment).
      */
-    private void processCreate(String username, Map<String, Object> activity) {
+    private void processCreate(String username, Map<String, Object> activity, RemoteActivityEnrichment enrichment) {
         try {
             String actor = (String) activity.get("actor");
             Object object = activity.get("object");
@@ -259,7 +264,7 @@ public class InboxProcessor {
 
             if (inReplyTo == null) {
                 // Standalone Note activity - could be a remote workout/activity
-                processRemoteActivity(username, actor, noteObject);
+                processRemoteActivity(username, actor, noteObject, enrichment);
             } else {
                 // Note with inReplyTo - this is a comment
                 processComment(username, actor, noteObject, inReplyTo);
@@ -375,7 +380,8 @@ public class InboxProcessor {
     /**
      * Process a remote activity (standalone Note representing a workout/fitness activity).
      */
-    private void processRemoteActivity(String username, String actor, Map<String, Object> noteObject) {
+    private void processRemoteActivity(String username, String actor, Map<String, Object> noteObject,
+                                       RemoteActivityEnrichment enrichment) {
         try {
             String activityUri = (String) noteObject.get("id");
             if (activityUri == null) {
@@ -419,23 +425,31 @@ public class InboxProcessor {
             RemoteActivity remoteActivity = RemoteActivity.builder()
                 .activityUri(activityUri)
                 .remoteActorUri(actor)
-                .activityType(guessActivityType(
-                    stringValue(noteObject.getOrDefault("summary", noteObject.get("content")))
+                .activityType(enrichment != null && enrichment.activityType() != null
+                    ? enrichment.activityType()
+                    : guessActivityType(stringValue(noteObject.getOrDefault("summary", noteObject.get("content")))))
+                .title(firstNonBlank(
+                    enrichment != null ? enrichment.title() : null,
+                    (String) noteObject.get("name"),
+                    (String) noteObject.get("summary"),
+                    "Untitled Activity"
                 ))
-                .title((String) noteObject.getOrDefault("name", noteObject.getOrDefault("summary", "Untitled Activity")))
-                .description(stripHtml((String) noteObject.get("content")))
+                .description(firstNonBlank(
+                    enrichment != null ? enrichment.description() : null,
+                    stripHtml((String) noteObject.get("content"))
+                ))
                 .publishedAt(publishedAt)
-                .totalDistance(null)
-                .totalDurationSeconds(null)
-                .elevationGain(null)
-                .averagePaceSeconds(null)
-                .averageHeartRate(null)
-                .maxSpeed(null)
-                .averageSpeed(null)
-                .calories(null)
+                .totalDistance(enrichment != null ? enrichment.totalDistance() : null)
+                .totalDurationSeconds(enrichment != null ? enrichment.totalDurationSeconds() : null)
+                .elevationGain(enrichment != null ? enrichment.elevationGain() : null)
+                .averagePaceSeconds(enrichment != null ? enrichment.averagePaceSeconds() : null)
+                .averageHeartRate(enrichment != null ? enrichment.averageHeartRate() : null)
+                .maxSpeed(enrichment != null ? enrichment.maxSpeed() : null)
+                .averageSpeed(enrichment != null ? enrichment.averageSpeed() : null)
+                .calories(enrichment != null ? enrichment.calories() : null)
                 .mapImageUrl(attachments.get("mapImage"))
                 .trackGeojsonUrl(attachments.get("trackGeojson"))
-                .simplifiedTrack(null)
+                .simplifiedTrack(enrichment != null ? enrichment.simplifiedTrack() : null)
                 .visibility(visibility)
                 .activityPubObject(serializeToJson(noteObject))
                 .build();
@@ -687,6 +701,15 @@ public class InboxProcessor {
 
     private String stringValue(Object value) {
         return value != null ? String.valueOf(value) : null;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /**

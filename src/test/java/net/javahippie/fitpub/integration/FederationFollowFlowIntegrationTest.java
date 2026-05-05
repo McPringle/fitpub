@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.javahippie.fitpub.config.TestcontainersConfiguration;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.service.ActivityImageService;
+import net.javahippie.fitpub.service.RemoteActivityDetailsFetcher;
+import net.javahippie.fitpub.service.RemoteActivityEnrichment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
@@ -92,6 +94,9 @@ class FederationFollowFlowIntegrationTest {
 
     @MockBean
     private ActivityImageService activityImageService;
+
+    @MockBean
+    private RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -376,6 +381,17 @@ class FederationFollowFlowIntegrationTest {
             "POST", inboxUrl, body, privateKeyPem, exportingActorUri + "#main-key"
         );
 
+        when(remoteActivityDetailsFetcher.fetch((String) exportedNote.get("id"))).thenReturn(java.util.Optional.of(
+            RemoteActivityEnrichment.builder()
+                .activityType("RUN")
+                .title("Lunch Run")
+                .description("Sunny run in the city")
+                .totalDistance(5000L)
+                .totalDurationSeconds(1800L)
+                .elevationGain(100)
+                .build()
+        ));
+
         mockMvc.perform(post(inboxPath)
                 .contentType("application/activity+json")
                 .header("Host", sigHeaders.host)
@@ -391,15 +407,14 @@ class FederationFollowFlowIntegrationTest {
         assertThat(imported.getActivityUri()).isEqualTo(exportedNote.get("id"));
         assertThat(imported.getRemoteActorUri()).isEqualTo(exportingActorUri);
         assertThat(exportedNote).doesNotContainKey("workoutData");
-        assertThat(imported.getTitle()).isEqualTo(exportedNote.getOrDefault("name",
-            exportedNote.getOrDefault("summary", "Untitled Activity")));
-        assertThat(imported.getDescription()).contains("Lunch Run");
+        assertThat(imported.getTitle()).isEqualTo("Lunch Run");
+        assertThat(imported.getDescription()).isEqualTo("Sunny run in the city");
         assertThat(imported.getPublishedAt()).isEqualTo(Instant.parse((String) exportedNote.get("published")));
         assertThat(imported.getVisibility()).isEqualTo(RemoteActivity.Visibility.PUBLIC);
         assertThat(imported.getActivityType()).isEqualTo("RUN");
-        assertThat(imported.getTotalDistance()).isNull();
-        assertThat(imported.getTotalDurationSeconds()).isNull();
-        assertThat(imported.getElevationGain()).isNull();
+        assertThat(imported.getTotalDistance()).isEqualTo(5000L);
+        assertThat(imported.getTotalDurationSeconds()).isEqualTo(1800L);
+        assertThat(imported.getElevationGain()).isEqualTo(100);
         assertThat(imported.getAveragePaceSeconds()).isNull();
         assertThat(imported.getAverageHeartRate()).isNull();
         assertThat(imported.getMaxSpeed()).isNull();

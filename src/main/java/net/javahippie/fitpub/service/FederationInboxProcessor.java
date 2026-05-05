@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.entity.FederationInbox;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -25,15 +27,16 @@ public class FederationInboxProcessor {
 
     private final FederationInboxService federationInboxService;
     private final InboxProcessor inboxProcessor;
+    private final RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
     private final ObjectMapper objectMapper;
 
-    @org.springframework.beans.factory.annotation.Value("${fitpub.activitypub.inbox.max-attempts:10}")
+    @Value("${fitpub.activitypub.inbox.max-attempts:10}")
     private int maxAttempts;
 
-    @org.springframework.beans.factory.annotation.Value("${fitpub.activitypub.inbox.batch-size:20}")
+    @Value("${fitpub.activitypub.inbox.batch-size:20}")
     private int batchSize;
 
-    @org.springframework.beans.factory.annotation.Value("${fitpub.activitypub.inbox.retry-delay-seconds:300}")
+    @Value("${fitpub.activitypub.inbox.retry-delay-seconds:300}")
     private long retryDelaySeconds;
 
     public void trigger(UUID inboxEntryId) {
@@ -55,7 +58,8 @@ public class FederationInboxProcessor {
                 entry.getPayloadJson(),
                 new TypeReference<Map<String, Object>>() {}
             );
-            inboxProcessor.processActivity(entry.getRecipientUsername(), activity);
+            RemoteActivityEnrichment enrichment = resolveEnrichment(activity).orElse(null);
+            inboxProcessor.processActivity(entry.getRecipientUsername(), activity, enrichment);
             federationInboxService.markDone(entry.getId());
         } catch (Exception e) {
             log.warn("Failed processing federation inbox entry {} on attempt {}",
@@ -73,5 +77,25 @@ public class FederationInboxProcessor {
         long multiplier = 1L << Math.max(0, attemptCount - 1);
         long delaySeconds = Math.min(MAX_BACKOFF_SECONDS, retryDelaySeconds * multiplier);
         return LocalDateTime.now().plusSeconds(delaySeconds);
+    }
+
+    private Optional<RemoteActivityEnrichment> resolveEnrichment(Map<String, Object> activity) {
+        if (!"Create".equals(activity.get("type"))) {
+            return Optional.empty();
+        }
+
+        Object object = activity.get("object");
+        if (!(object instanceof Map<?, ?> objectMap)) {
+            return Optional.empty();
+        }
+
+        if (!"Note".equals(objectMap.get("type")) || objectMap.get("inReplyTo") != null) {
+            return Optional.empty();
+        }
+
+        Object id = objectMap.get("id");
+        return id instanceof String activityUri
+            ? remoteActivityDetailsFetcher.fetch(activityUri)
+            : Optional.empty();
     }
 }
