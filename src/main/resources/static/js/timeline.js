@@ -540,7 +540,7 @@ const FitPubTimeline = {
             return;
         }
 
-        // Handle remote activities differently - show static map image
+        // Handle remote activities differently - show static map image or simplified track
         if (!activity.isLocal) {
             if (activity.mapImageUrl) {
                 mapElement.innerHTML = `
@@ -557,6 +557,33 @@ const FitPubTimeline = {
                         </div>
                     </div>
                 `;
+            } else if (activity.simplifiedTrack) {
+                try {
+                    const map = L.map(mapId, {
+                        zoomControl: false,
+                        scrollWheelZoom: false,
+                        dragging: false,
+                        touchZoom: false
+                    });
+
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap contributors',
+                        maxZoom: 18
+                    }).addTo(map);
+
+                    const geoJsonLayer = L.geoJSON(activity.simplifiedTrack, {
+                        style: {
+                            color: '#0d6efd',
+                            weight: 3,
+                            opacity: 0.8
+                        }
+                    }).addTo(map);
+
+                    map.fitBounds(geoJsonLayer.getBounds(), { padding: [20, 20] });
+                } catch (error) {
+                    console.error('Error rendering remote simplified track:', error);
+                    mapElement.innerHTML = '<div class="d-flex align-items-center justify-content-center h-100 bg-light"><p class="text-muted">Failed to load map</p></div>';
+                }
             } else {
                 mapElement.innerHTML = '<div class="d-flex align-items-center justify-content-center h-100 bg-light"><p class="text-muted">No map available for this remote activity</p></div>';
             }
