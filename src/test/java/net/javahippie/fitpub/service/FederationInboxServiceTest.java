@@ -131,6 +131,7 @@ class FederationInboxServiceTest {
             .payloadJson("{}")
             .status(FederationInbox.Status.PROCESSING)
             .attemptCount(2)
+            .processingStartedAt(LocalDateTime.now().minusMinutes(1))
             .nextAttemptAt(LocalDateTime.now())
             .build();
         LocalDateTime retryAt = LocalDateTime.now().plusMinutes(5);
@@ -142,7 +143,7 @@ class FederationInboxServiceTest {
         assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.PENDING);
         assertThat(entry.getNextAttemptAt()).isEqualTo(retryAt);
         assertThat(entry.getLastError()).isEqualTo("temporary");
-        assertThat(entry.getProcessingStartedAt()).isNull();
+        assertThat(entry.getProcessingStartedAt()).isNotNull();
     }
 
     @Test
@@ -165,5 +166,32 @@ class FederationInboxServiceTest {
 
         assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.ERROR);
         assertThat(entry.getLastError()).isEqualTo("boom");
+    }
+
+    @Test
+    @DisplayName("Should recover stale processing entry back to pending")
+    void recoverStaleProcessingEntry_ShouldRequeueEntry() {
+        UUID id = UUID.randomUUID();
+        LocalDateTime startedAt = LocalDateTime.now().minusMinutes(30);
+        LocalDateTime retryAt = LocalDateTime.now().plusMinutes(1);
+        FederationInbox entry = FederationInbox.builder()
+            .id(id)
+            .recipientUsername("janedoe")
+            .activityType("Create")
+            .payloadJson("{}")
+            .status(FederationInbox.Status.PROCESSING)
+            .attemptCount(3)
+            .processingStartedAt(startedAt)
+            .nextAttemptAt(LocalDateTime.now())
+            .build();
+
+        when(federationInboxRepository.findByIdForUpdate(id)).thenReturn(Optional.of(entry));
+
+        federationInboxService.recoverStaleProcessingEntry(id, "Processing timed out", 10, retryAt);
+
+        assertThat(entry.getStatus()).isEqualTo(FederationInbox.Status.PENDING);
+        assertThat(entry.getNextAttemptAt()).isEqualTo(retryAt);
+        assertThat(entry.getLastError()).isEqualTo("Processing timed out");
+        assertThat(entry.getProcessingStartedAt()).isEqualTo(startedAt);
     }
 }

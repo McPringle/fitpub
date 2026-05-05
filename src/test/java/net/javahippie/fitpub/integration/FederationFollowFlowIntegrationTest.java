@@ -26,9 +26,12 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -46,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -61,6 +65,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 @Import(TestcontainersConfiguration.class)
 class FederationFollowFlowIntegrationTest {
+
+    @TestConfiguration
+    static class AsyncTestConfiguration {
+        @Bean(name = "taskExecutor")
+        Executor taskExecutor() {
+            return new SyncTaskExecutor();
+        }
+    }
 
     @Autowired
     private MockMvc mockMvc;

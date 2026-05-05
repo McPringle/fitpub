@@ -69,6 +69,17 @@ public class FederationInboxService {
             .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<UUID> findStaleProcessingEntryIds(LocalDateTime threshold, int limit) {
+        return federationInboxRepository.findByStatusAndProcessingStartedAtLessThanEqualOrderByProcessingStartedAtAsc(
+                FederationInbox.Status.PROCESSING,
+                threshold,
+                PageRequest.of(0, limit))
+            .stream()
+            .map(FederationInbox::getId)
+            .toList();
+    }
+
     @Transactional
     public void markDone(UUID id) {
         federationInboxRepository.findByIdForUpdate(id).ifPresent(entry -> {
@@ -83,7 +94,24 @@ public class FederationInboxService {
     public void markForRetry(UUID id, Exception error, int maxAttempts, LocalDateTime nextAttemptAt) {
         federationInboxRepository.findByIdForUpdate(id).ifPresent(entry -> {
             entry.setLastError(truncateError(error));
-            entry.setProcessingStartedAt(null);
+            entry.setProcessedAt(null);
+            if (entry.getAttemptCount() >= maxAttempts) {
+                entry.setStatus(FederationInbox.Status.ERROR);
+            } else {
+                entry.setStatus(FederationInbox.Status.PENDING);
+                entry.setNextAttemptAt(nextAttemptAt);
+            }
+            federationInboxRepository.save(entry);
+        });
+    }
+
+    @Transactional
+    public void recoverStaleProcessingEntry(UUID id, String errorMessage, int maxAttempts, LocalDateTime nextAttemptAt) {
+        federationInboxRepository.findByIdForUpdate(id).ifPresent(entry -> {
+            if (entry.getStatus() != FederationInbox.Status.PROCESSING) {
+                return;
+            }
+            entry.setLastError(truncateErrorMessage(errorMessage));
             entry.setProcessedAt(null);
             if (entry.getAttemptCount() >= maxAttempts) {
                 entry.setStatus(FederationInbox.Status.ERROR);
@@ -120,6 +148,10 @@ public class FederationInboxService {
 
     private String truncateError(Exception error) {
         String message = error.getMessage() != null ? error.getMessage() : error.getClass().getSimpleName();
+        return truncateErrorMessage(message);
+    }
+
+    private String truncateErrorMessage(String message) {
         if (message.length() <= 4000) {
             return message;
         }

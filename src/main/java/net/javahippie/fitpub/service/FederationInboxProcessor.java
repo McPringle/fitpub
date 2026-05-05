@@ -40,6 +40,9 @@ public class FederationInboxProcessor {
     @Value("${fitpub.activitypub.inbox.retry-delay-seconds:300}")
     private long retryDelaySeconds;
 
+    @Value("${fitpub.activitypub.inbox.processing-timeout-seconds:900}")
+    private long processingTimeoutSeconds;
+
     @Async("taskExecutor")
     public void triggerAsync(UUID inboxEntryId) {
         trigger(inboxEntryId);
@@ -52,6 +55,7 @@ public class FederationInboxProcessor {
 
     @Scheduled(fixedDelayString = "${fitpub.activitypub.inbox.processing-interval-ms:300000}")
     public void processDueEntries() {
+        recoverStaleProcessingEntries();
         List<UUID> dueEntryIds = federationInboxService.findDueEntryIds(batchSize);
         for (UUID id : dueEntryIds) {
             trigger(id);
@@ -83,6 +87,20 @@ public class FederationInboxProcessor {
         long multiplier = 1L << Math.max(0, attemptCount - 1);
         long delaySeconds = Math.min(MAX_BACKOFF_SECONDS, retryDelaySeconds * multiplier);
         return LocalDateTime.now().plusSeconds(delaySeconds);
+    }
+
+    private void recoverStaleProcessingEntries() {
+        LocalDateTime threshold = LocalDateTime.now().minusSeconds(processingTimeoutSeconds);
+        List<UUID> staleEntryIds = federationInboxService.findStaleProcessingEntryIds(threshold, batchSize);
+        for (UUID id : staleEntryIds) {
+            log.warn("Recovering stale federation inbox entry {}", id);
+            federationInboxService.recoverStaleProcessingEntry(
+                id,
+                "Processing timed out after " + processingTimeoutSeconds + " seconds",
+                maxAttempts,
+                LocalDateTime.now()
+            );
+        }
     }
 
     private Optional<RemoteActivityEnrichment> resolveEnrichment(Map<String, Object> activity) {

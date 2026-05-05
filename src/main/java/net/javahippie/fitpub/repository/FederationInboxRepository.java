@@ -25,4 +25,10 @@ public interface FederationInboxRepository extends JpaRepository<FederationInbox
         LocalDateTime now,
         Pageable pageable
     );
+
+    List<FederationInbox> findByStatusAndProcessingStartedAtLessThanEqualOrderByProcessingStartedAtAsc(
+        FederationInbox.Status status,
+        LocalDateTime threshold,
+        Pageable pageable
+    );
 }

@@ -61,6 +61,7 @@ class FederationInboxProcessorTest {
         ReflectionTestUtils.setField(federationInboxProcessor, "maxAttempts", 10);
         ReflectionTestUtils.setField(federationInboxProcessor, "batchSize", 20);
         ReflectionTestUtils.setField(federationInboxProcessor, "retryDelaySeconds", 300L);
+        ReflectionTestUtils.setField(federationInboxProcessor, "processingTimeoutSeconds", 900L);
     }
 
     @Test
@@ -109,6 +110,7 @@ class FederationInboxProcessorTest {
     void processDueEntries_ShouldTriggerEachDueEntry() throws Exception {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
+        UUID stale = UUID.randomUUID();
         FederationInbox firstEntry = FederationInbox.builder()
             .id(first)
             .recipientUsername("janedoe")
@@ -125,7 +127,9 @@ class FederationInboxProcessorTest {
             .attemptCount(1)
             .nextAttemptAt(LocalDateTime.now())
             .build();
+        LocalDateTime staleThreshold = LocalDateTime.now().minusSeconds(900);
 
+        when(federationInboxService.findStaleProcessingEntryIds(any(LocalDateTime.class), eq(20))).thenReturn(List.of(stale));
         when(federationInboxService.findDueEntryIds(20)).thenReturn(List.of(first, second));
         when(federationInboxService.claimById(first)).thenReturn(Optional.of(firstEntry));
         when(federationInboxService.claimById(second)).thenReturn(Optional.of(secondEntry));
@@ -136,6 +140,7 @@ class FederationInboxProcessorTest {
 
         federationInboxProcessor.processDueEntries();
 
+        verify(federationInboxService).recoverStaleProcessingEntry(eq(stale), eq("Processing timed out after 900 seconds"), eq(10), any(LocalDateTime.class));
         verify(federationInboxService).claimById(first);
         verify(federationInboxService).claimById(second);
     }

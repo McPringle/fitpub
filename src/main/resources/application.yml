@@ -66,6 +66,7 @@ fitpub:
     request-timeout-seconds: 30
     inbox:
       processing-interval-ms: ${FITPUB_ACTIVITYPUB_INBOX_PROCESSING_INTERVAL_MS:300000}
+      processing-timeout-seconds: ${FITPUB_ACTIVITYPUB_INBOX_PROCESSING_TIMEOUT_SECONDS:900}
       batch-size: ${FITPUB_ACTIVITYPUB_INBOX_BATCH_SIZE:20}
       retry-delay-seconds: ${FITPUB_ACTIVITYPUB_INBOX_RETRY_DELAY_SECONDS:300}
       max-attempts: ${FITPUB_ACTIVITYPUB_INBOX_MAX_ATTEMPTS:10}
