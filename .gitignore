@@ -46,3 +46,10 @@ logs/
 /gadm_410.gpkg
 /.postgresdata/
 /peaks_worldwide.geojson
+
+### Coding Assistants ###
+.codex/
+.aider*
+.cursor/
+.roo/
+.windsurf/
