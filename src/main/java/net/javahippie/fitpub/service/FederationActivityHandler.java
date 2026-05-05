@@ -30,12 +30,12 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Processes incoming ActivityPub activities in the inbox.
+ * Handles the domain processing of a single inbound federated activity.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class InboxProcessor {
+public class FederationActivityHandler {
     private final UserRepository userRepository;
     private final FollowRepository followRepository;
     private final FederationService federationService;
@@ -99,7 +99,6 @@ public class InboxProcessor {
             String actor = (String) activity.get("actor");
             String object = (String) activity.get("object");
 
-            // Verify the follow is for the correct local user
             User localUser = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
 
@@ -109,33 +108,24 @@ public class InboxProcessor {
                 return;
             }
 
-            // Fetch remote actor information
             RemoteActor remoteActor = federationService.fetchRemoteActor(actor);
 
-            // Check if follow already exists
             Follow existing = followRepository.findByActivityId(activityId).orElse(null);
             if (existing != null) {
                 log.debug("Follow already processed: {}", activityId);
                 return;
             }
 
-            // Create follow relationship (as the object of the follow, from remote actor's perspective)
-            // Here we store that the remote actor is following our local user
-            // Note: We're storing it from the perspective of "who is following whom"
             Follow follow = Follow.builder()
-                .followerId(null) // Remote actor, so no local user ID
-                .remoteActorUri(actor) // The remote actor who is following
-                .followingActorUri(expectedObjectUri) // The local user being followed
-                .status(Follow.FollowStatus.ACCEPTED) // Auto-accept for now
+                .followerId(null)
+                .remoteActorUri(actor)
+                .followingActorUri(expectedObjectUri)
+                .status(Follow.FollowStatus.ACCEPTED)
                 .activityId(activityId)
                 .build();
 
             followRepository.save(follow);
-
-            // Send Accept activity
             federationService.sendAcceptActivity(follow, localUser);
-
-            // Create notification for followed user
             notificationService.createUserFollowedNotification(localUser, actor);
 
             log.info("Processed Follow from {} for user {}", actor, username);
@@ -145,9 +135,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process an Undo activity (e.g., unfollow, unlike).
-     */
     private void processUndo(String username, Map<String, Object> activity) {
         try {
             String actor = (String) activity.get("actor");
@@ -178,15 +165,11 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process an Accept activity (e.g., follow request accepted).
-     */
     private void processAccept(String username, Map<String, Object> activity) {
         try {
             Object object = activity.get("object");
             String activityId = null;
 
-            // Handle both embedded object (Map) and reference (String)
             if (object instanceof Map) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> acceptObject = (Map<String, Object>) object;
@@ -198,13 +181,10 @@ public class InboxProcessor {
             if (activityId != null) {
                 Follow follow = followRepository.findByActivityId(activityId).orElse(null);
                 if (follow != null && follow.getStatus() == Follow.FollowStatus.PENDING) {
-                    // Update follow status to ACCEPTED
                     follow.setStatus(Follow.FollowStatus.ACCEPTED);
                     followRepository.save(follow);
                     log.info("Follow request accepted: {}", activityId);
 
-                    // Create notification for the follower
-                    // The follower is the local user who initiated the follow request
                     UUID followerId = follow.getFollowerId();
                     if (followerId != null) {
                         User follower = userRepository.findById(followerId).orElse(null);
@@ -225,9 +205,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process a Create activity (e.g., new post, comment).
-     */
     private void processCreate(String username, Map<String, Object> activity, RemoteActivityEnrichment enrichment) {
         try {
             String actor = (String) activity.get("actor");
@@ -247,13 +224,11 @@ public class InboxProcessor {
                 return;
             }
 
-            // Check if this Note quotes a local activity (FEP-5e53).
-            // Mastodon and other implementations use various field names for the quote reference.
             String quoteUri = firstNonNull(
-                    (String) noteObject.get("quoteUri"),
-                    (String) noteObject.get("quote"),
-                    (String) noteObject.get("quoteUrl"),
-                    (String) noteObject.get("_misskey_quote")
+                (String) noteObject.get("quoteUri"),
+                (String) noteObject.get("quote"),
+                (String) noteObject.get("quoteUrl"),
+                (String) noteObject.get("_misskey_quote")
             );
 
             if (quoteUri != null) {
@@ -263,10 +238,8 @@ public class InboxProcessor {
             String inReplyTo = (String) noteObject.get("inReplyTo");
 
             if (inReplyTo == null) {
-                // Standalone Note activity - could be a remote workout/activity
                 processRemoteActivity(username, actor, noteObject, enrichment);
             } else {
-                // Note with inReplyTo - this is a comment
                 processComment(username, actor, noteObject, inReplyTo);
             }
         } catch (Exception e) {
@@ -274,11 +247,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * If the quoted URI points to a local activity, send an Accept back to
-     * the quoting actor so that Mastodon (and other FEP-5e53 implementations)
-     * marks the quote as approved.
-     */
     private void handleQuoteApproval(String username, Map<String, Object> createActivity, String actor, String quoteUri) {
         try {
             UUID activityId = extractActivityIdFromUri(quoteUri);
@@ -294,12 +262,8 @@ public class InboxProcessor {
             }
 
             User localUser = userRepository.findByUsername(username)
-                    .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
 
-            // Mastodon tracks pending quote approvals by the Note URI (the inner
-            // object's "id"), not by the wrapping Create activity's "id".  The Accept
-            // we send back must therefore reference the Note URI so Mastodon can match
-            // it to the pending approval.
             @SuppressWarnings("unchecked")
             Map<String, Object> noteObject = (Map<String, Object>) createActivity.get("object");
             String noteUri = (String) noteObject.get("id");
@@ -319,46 +283,37 @@ public class InboxProcessor {
         return null;
     }
 
-    /**
-     * Process a comment (Note with inReplyTo).
-     */
     private void processComment(String username, String actor, Map<String, Object> noteObject, String inReplyTo) {
         try {
-            // Extract activity ID from inReplyTo URI
             UUID activityId = extractActivityIdFromUri(inReplyTo);
             if (activityId == null) {
                 log.warn("Could not extract activity ID from inReplyTo: {}", inReplyTo);
                 return;
             }
 
-            // Check if activity exists
             Activity localActivity = activityRepository.findById(activityId).orElse(null);
             if (localActivity == null) {
                 log.warn("Activity not found: {}", activityId);
                 return;
             }
 
-            // Fetch remote actor information
             RemoteActor remoteActor = federationService.fetchRemoteActor(actor);
 
-            // Get comment content
             String content = (String) noteObject.get("content");
             if (content == null || content.trim().isEmpty()) {
                 log.warn("Create/Note has no content");
                 return;
             }
 
-            // Check if comment already exists by activityPubId
             String commentId = (String) noteObject.get("id");
             if (commentRepository.findByActivityPubId(commentId).isPresent()) {
                 log.debug("Comment already exists with activityPubId: {}", commentId);
                 return;
             }
 
-            // Create comment
             Comment comment = Comment.builder()
                 .activityId(activityId)
-                .userId(null) // Remote actor, not a local user
+                .userId(null)
                 .remoteActorUri(actor)
                 .displayName(remoteActor.getDisplayName() != null ? remoteActor.getDisplayName() : remoteActor.getUsername())
                 .avatarUrl(remoteActor.getAvatarUrl())
@@ -369,7 +324,6 @@ public class InboxProcessor {
             commentRepository.save(comment);
             log.info("Processed Create/Note (comment) from {} for activity {}", actor, activityId);
 
-            // Create notification for activity owner
             notificationService.createActivityCommentedNotification(localActivity, comment, actor);
 
         } catch (Exception e) {
@@ -377,9 +331,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process a remote activity (standalone Note representing a workout/fitness activity).
-     */
     private void processRemoteActivity(String username, String actor, Map<String, Object> noteObject,
                                        RemoteActivityEnrichment enrichment) {
         try {
@@ -389,16 +340,13 @@ public class InboxProcessor {
                 return;
             }
 
-            // Check if activity already exists (deduplication)
             if (remoteActivityRepository.existsByActivityUri(activityUri)) {
                 log.debug("Remote activity already exists: {}", activityUri);
                 return;
             }
 
-            // Fetch and cache remote actor
             RemoteActor remoteActor = federationService.fetchRemoteActor(actor);
 
-            // Check if local user follows this remote actor
             User localUser = userRepository.findByUsername(username).orElse(null);
             if (localUser == null) {
                 log.warn("Local user not found: {}", username);
@@ -417,11 +365,9 @@ public class InboxProcessor {
             Map<String, String> attachments = extractAttachments(noteObject);
             RemoteActivity.Visibility visibility = determineVisibility(noteObject);
 
-            // Parse published timestamp
             String publishedStr = (String) noteObject.get("published");
             Instant publishedAt = parsePublishedAt(publishedStr);
 
-            // Build RemoteActivity entity
             RemoteActivity remoteActivity = RemoteActivity.builder()
                 .activityUri(activityUri)
                 .remoteActorUri(actor)
@@ -462,18 +408,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process a Like activity.
-     *
-     * <p>Pleroma/Akkoma carry an emoji in the {@code content} field; vanilla Mastodon
-     * doesn't set it. We normalise via {@link net.javahippie.fitpub.model.ReactionEmoji#normalise}
-     * so unknown / missing values gracefully degrade to ❤️ rather than being rejected.
-     *
-     * <p>If the same remote actor has already reacted to this activity, we update the
-     * existing row in place — this matches the local UPSERT semantics so a remote actor
-     * can switch their reaction without us seeing it as a "new" like (and without
-     * generating a duplicate notification).
-     */
     private void processLike(String username, Map<String, Object> activity) {
         try {
             String actor = (String) activity.get("actor");
@@ -483,26 +417,20 @@ public class InboxProcessor {
 
             log.debug("Received Like ({}) from {} for object {}", emoji, actor, objectUri);
 
-            // Extract activity ID from the object URI
-            // Expected format: https://fitpub.example/activities/{uuid}
             UUID activityId = extractActivityIdFromUri(objectUri);
             if (activityId == null) {
                 log.warn("Could not extract activity ID from object URI: {}", objectUri);
                 return;
             }
 
-            // Check if the activity exists
             Activity localActivity = activityRepository.findById(activityId).orElse(null);
             if (localActivity == null) {
                 log.warn("Activity not found: {}", activityId);
                 return;
             }
 
-            // Fetch remote actor information
             RemoteActor remoteActor = federationService.fetchRemoteActor(actor);
 
-            // UPSERT: if a previous reaction from this actor exists, update the emoji
-            // in place. Otherwise create a new row and notify the activity owner.
             java.util.Optional<Like> existing =
                 likeRepository.findByActivityIdAndRemoteActorUri(activityId, actor);
             if (existing.isPresent()) {
@@ -522,10 +450,9 @@ public class InboxProcessor {
                 return;
             }
 
-            // Create the like
             Like like = Like.builder()
                 .activityId(activityId)
-                .userId(null) // Remote actor, not a local user
+                .userId(null)
                 .remoteActorUri(actor)
                 .emoji(emoji)
                 .displayName(remoteActor.getDisplayName() != null ? remoteActor.getDisplayName() : remoteActor.getUsername())
@@ -535,7 +462,6 @@ public class InboxProcessor {
             likeRepository.save(like);
             log.info("Processed Like ({}) from {} for activity {}", emoji, actor, activityId);
 
-            // Create notification for activity owner
             notificationService.createActivityLikedNotification(localActivity, actor, emoji);
 
         } catch (Exception e) {
@@ -543,16 +469,11 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process a Delete activity.
-     * Handles both actor deletions (account removal) and object deletions (activity/comment removal).
-     */
     private void processDelete(String username, Map<String, Object> activity) {
         try {
             String actor = (String) activity.get("actor");
             Object object = activity.get("object");
 
-            // Determine object URI (can be a string or an embedded object)
             String objectUri;
             if (object instanceof Map) {
                 objectUri = (String) ((Map<?, ?>) object).get("id");
@@ -567,7 +488,6 @@ public class InboxProcessor {
 
             log.info("Processing Delete from {} for object {}", actor, objectUri);
 
-            // Check if this is an actor deletion (object URI equals actor URI)
             if (objectUri.equals(actor)) {
                 processActorDelete(actor);
             } else {
@@ -579,27 +499,19 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process actor (account) deletion.
-     * Removes all data associated with the deleted remote actor.
-     */
     private void processActorDelete(String actorUri) {
         try {
             log.info("Processing actor deletion: {}", actorUri);
 
-            // Delete follow relationships where this actor is the follower
             followRepository.deleteByRemoteActorUri(actorUri);
             log.debug("Deleted follows where actor {} was the follower", actorUri);
 
-            // Delete follow relationships where this actor is being followed
             followRepository.deleteByFollowingActorUri(actorUri);
             log.debug("Deleted follows where actor {} was being followed", actorUri);
 
-            // Delete all likes from this actor
             likeRepository.deleteByRemoteActorUri(actorUri);
             log.debug("Deleted likes from actor {}", actorUri);
 
-            // Soft-delete comments from this actor (preserve for context)
             java.util.List<Comment> comments = commentRepository.findByRemoteActorUri(actorUri);
             for (Comment comment : comments) {
                 comment.setDeleted(true);
@@ -610,11 +522,9 @@ public class InboxProcessor {
                 log.debug("Soft-deleted {} comments from actor {}", comments.size(), actorUri);
             }
 
-            // Delete all remote activities from this actor
             remoteActivityRepository.deleteByRemoteActorUri(actorUri);
             log.debug("Deleted remote activities from actor {}", actorUri);
 
-            // Delete the remote actor record itself
             remoteActorRepository.findByActorUri(actorUri).ifPresent(remoteActor -> {
                 remoteActorRepository.delete(remoteActor);
                 log.debug("Deleted remote actor record for {}", actorUri);
@@ -627,21 +537,15 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Process object deletion (activity or comment).
-     * Removes the specific object that was deleted.
-     */
     private void processObjectDelete(String objectUri) {
         try {
             log.info("Processing object deletion: {}", objectUri);
 
-            // Try to delete as a remote activity
             remoteActivityRepository.findByActivityUri(objectUri).ifPresent(remoteActivity -> {
                 remoteActivityRepository.delete(remoteActivity);
                 log.info("Deleted remote activity: {}", objectUri);
             });
 
-            // Try to soft-delete as a comment
             commentRepository.findByActivityPubId(objectUri).ifPresent(comment -> {
                 comment.setDeleted(true);
                 comment.setContent("[deleted]");
@@ -654,10 +558,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Extract activity UUID from URI.
-     * Expects format: https://fitpub.example/activities/{uuid}
-     */
     private UUID extractActivityIdFromUri(String uri) {
         try {
             if (uri == null || !uri.startsWith(baseUrl + "/activities/")) {
@@ -671,22 +571,16 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Strip HTML tags from content.
-     * Mastodon sends HTML formatted content, we want plain text.
-     */
     private String stripHtml(String html) {
         if (html == null) {
             return "";
         }
-        // Replace common HTML tags with appropriate text
         String text = html
             .replaceAll("<br\\s*/?>", "\n")
             .replaceAll("<p>", "")
             .replaceAll("</p>", "\n")
-            .replaceAll("<[^>]+>", ""); // Remove all other HTML tags
+            .replaceAll("<[^>]+>", "");
 
-        // Decode HTML entities
         text = text
             .replace("&lt;", "<")
             .replace("&gt;", ">")
@@ -696,8 +590,6 @@ public class InboxProcessor {
 
         return text.trim();
     }
-
-    // ==================== Remote Activity Helper Methods ====================
 
     private String stringValue(Object value) {
         return value != null ? String.valueOf(value) : null;
@@ -712,9 +604,6 @@ public class InboxProcessor {
         return null;
     }
 
-    /**
-     * Extract attachment URLs (map image, GeoJSON) from a Note object.
-     */
     private Map<String, String> extractAttachments(Map<String, Object> noteObject) {
         Map<String, String> attachments = new java.util.HashMap<>();
 
@@ -734,14 +623,11 @@ public class InboxProcessor {
                     String name = (String) attach.get("name");
 
                     if (url != null) {
-                        // Map image
                         if ("Image".equals(type) && (mediaType != null && mediaType.startsWith("image/"))) {
                             if (name != null && name.toLowerCase().contains("map")) {
                                 attachments.put("mapImage", url);
                             }
-                        }
-                        // GeoJSON track
-                        else if ("Document".equals(type) && "application/geo+json".equals(mediaType)) {
+                        } else if ("Document".equals(type) && "application/geo+json".equals(mediaType)) {
                             attachments.put("trackGeojson", url);
                         }
                     }
@@ -752,9 +638,6 @@ public class InboxProcessor {
         return attachments;
     }
 
-    /**
-     * Determine visibility from ActivityPub "to" and "cc" fields.
-     */
     private RemoteActivity.Visibility determineVisibility(Map<String, Object> noteObject) {
         Object toObj = noteObject.get("to");
         Object ccObj = noteObject.get("cc");
@@ -762,37 +645,27 @@ public class InboxProcessor {
         java.util.List<String> toList = objectToStringList(toObj);
         java.util.List<String> ccList = objectToStringList(ccObj);
 
-        // Check if Public is in "to" or "cc"
         boolean isPublic = toList.contains("https://www.w3.org/ns/activitystreams#Public") ||
-                          ccList.contains("https://www.w3.org/ns/activitystreams#Public") ||
-                          toList.contains("as:Public") ||
-                          ccList.contains("as:Public") ||
-                          toList.contains("Public") ||
-                          ccList.contains("Public");
+            ccList.contains("https://www.w3.org/ns/activitystreams#Public") ||
+            toList.contains("as:Public") ||
+            ccList.contains("as:Public") ||
+            toList.contains("Public") ||
+            ccList.contains("Public");
 
         if (isPublic) {
             return RemoteActivity.Visibility.PUBLIC;
         }
 
-        // If it has followers in to/cc, it's FOLLOWERS visibility
         boolean hasFollowers = toList.stream().anyMatch(s -> s.contains("/followers")) ||
-                              ccList.stream().anyMatch(s -> s.contains("/followers"));
+            ccList.stream().anyMatch(s -> s.contains("/followers"));
 
         if (hasFollowers) {
             return RemoteActivity.Visibility.FOLLOWERS;
         }
 
-        // Default to PRIVATE
         return RemoteActivity.Visibility.PRIVATE;
     }
 
-    /**
-     * Parse ActivityPub published timestamps.
-     *
-     * <p>Preferred input is a full ISO-8601 instant with timezone/offset. Some
-     * remote implementations still send zoneless timestamps, so we accept those
-     * as a compatibility fallback and interpret them as UTC.
-     */
     private Instant parsePublishedAt(String publishedStr) {
         if (publishedStr == null || publishedStr.isBlank()) {
             return Instant.now();
@@ -801,32 +674,26 @@ public class InboxProcessor {
         try {
             return Instant.parse(publishedStr);
         } catch (DateTimeParseException ignored) {
-            // Fall through to compatibility parsers below.
         }
 
         try {
             return OffsetDateTime.parse(publishedStr).toInstant();
         } catch (DateTimeParseException ignored) {
-            // Fall through to compatibility parsers below.
         }
 
         try {
             return ZonedDateTime.parse(publishedStr).toInstant();
         } catch (DateTimeParseException ignored) {
-            // Fall through to compatibility parsers below.
         }
 
         try {
             return LocalDateTime.parse(publishedStr).atOffset(ZoneOffset.UTC).toInstant();
         } catch (DateTimeParseException e) {
-            log.warn("Failed to parse published timestamp: {}", publishedStr, e);
+            log.warn("Failed to parse published timestamp '{}', falling back to now()", publishedStr);
             return Instant.now();
         }
     }
 
-    /**
-     * Serialize object to JSON string.
-     */
     private String serializeToJson(Object object) {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(object);
@@ -836,9 +703,6 @@ public class InboxProcessor {
         }
     }
 
-    /**
-     * Convert object to list of strings (handles both single string and list).
-     */
     private java.util.List<String> objectToStringList(Object obj) {
         if (obj == null) {
             return java.util.Collections.emptyList();
@@ -857,9 +721,6 @@ public class InboxProcessor {
         return java.util.Collections.emptyList();
     }
 
-    /**
-     * Guess activity type from text.
-     */
     private String guessActivityType(String text) {
         if (text == null) {
             return "UNKNOWN";
@@ -871,5 +732,4 @@ public class InboxProcessor {
         if (lower.contains("swim")) return "SWIM";
         return "UNKNOWN";
     }
-
 }

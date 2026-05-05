@@ -33,8 +33,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("InboxProcessor Tests")
-class InboxProcessorTest {
+@DisplayName("FederationActivityHandler Tests")
+class FederationActivityHandlerTest {
 
     @Mock
     private UserRepository userRepository;
@@ -64,7 +64,7 @@ class InboxProcessorTest {
     private RemoteActorRepository remoteActorRepository;
 
     @InjectMocks
-    private InboxProcessor inboxProcessor;
+    private FederationActivityHandler federationActivityHandler;
 
     private User localUser;
     private String remoteActorUri;
@@ -82,7 +82,7 @@ class InboxProcessorTest {
 
         remoteActorUri = "https://fitpub.example.com/users/JohnDoe";
 
-        ReflectionTestUtils.setField(inboxProcessor, "baseUrl", "https://fitpub.example");
+        ReflectionTestUtils.setField(federationActivityHandler, "baseUrl", "https://fitpub.example");
     }
 
     @Test
@@ -120,10 +120,10 @@ class InboxProcessorTest {
             "object", note
         );
 
-        ArgumentCaptor<net.javahippie.fitpub.model.entity.RemoteActivity> remoteActivityCaptor =
-            ArgumentCaptor.forClass(net.javahippie.fitpub.model.entity.RemoteActivity.class);
+        ArgumentCaptor<RemoteActivity> remoteActivityCaptor =
+            ArgumentCaptor.forClass(RemoteActivity.class);
 
-        inboxProcessor.processActivity("JaneDoe", activity);
+        federationActivityHandler.processActivity("JaneDoe", activity);
 
         verify(remoteActivityRepository).existsByActivityUri("https://fitpub.example.com/activities/123");
         verify(federationService).fetchRemoteActor(remoteActorUri);
@@ -194,7 +194,7 @@ class InboxProcessorTest {
         ArgumentCaptor<RemoteActivity> remoteActivityCaptor =
             ArgumentCaptor.forClass(RemoteActivity.class);
 
-        inboxProcessor.processActivity("JaneDoe", activity);
+        federationActivityHandler.processActivity("JaneDoe", activity);
 
         verify(remoteActivityRepository).save(remoteActivityCaptor.capture());
 

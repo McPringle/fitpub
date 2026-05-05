@@ -31,7 +31,7 @@ class FederationInboxProcessorTest {
     private FederationInboxService federationInboxService;
 
     @Mock
-    private InboxProcessor inboxProcessor;
+    private FederationActivityHandler federationActivityHandler;
 
     @Mock
     private RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
@@ -88,7 +88,7 @@ class FederationInboxProcessorTest {
 
         federationInboxProcessor.trigger(entryId);
 
-        verify(inboxProcessor).processActivity("janedoe", payload, enrichment);
+        verify(federationActivityHandler).processActivity("janedoe", payload, enrichment);
         verify(federationInboxService).markDone(entryId);
     }
 
@@ -102,7 +102,7 @@ class FederationInboxProcessorTest {
         federationInboxProcessor.trigger(entryId);
 
         verify(federationInboxService).markForRetry(eq(entryId), any(Exception.class), eq(10), any(LocalDateTime.class));
-        verify(inboxProcessor, never()).processActivity(eq("janedoe"), any());
+        verify(federationActivityHandler, never()).processActivity(eq("janedoe"), any());
     }
 
     @Test

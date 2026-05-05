@@ -27,7 +27,7 @@ public class FederationInboxProcessor {
     private static final long MAX_BACKOFF_SECONDS = 86_400;
 
     private final FederationInboxService federationInboxService;
-    private final InboxProcessor inboxProcessor;
+    private final FederationActivityHandler federationActivityHandler;
     private final RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
     private final ObjectMapper objectMapper;
 
@@ -69,7 +69,7 @@ public class FederationInboxProcessor {
                 new TypeReference<Map<String, Object>>() {}
             );
             RemoteActivityEnrichment enrichment = resolveEnrichment(activity).orElse(null);
-            inboxProcessor.processActivity(entry.getRecipientUsername(), activity, enrichment);
+            federationActivityHandler.processActivity(entry.getRecipientUsername(), activity, enrichment);
             federationInboxService.markDone(entry.getId());
         } catch (Exception e) {
             log.warn("Failed processing federation inbox entry {} on attempt {}",
