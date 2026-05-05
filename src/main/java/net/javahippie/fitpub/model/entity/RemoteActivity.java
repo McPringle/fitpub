@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.Type;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.locationtech.jts.geom.LineString;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -136,6 +137,12 @@ public class RemoteActivity {
      */
     @Column(name = "track_geojson_url", length = 512)
     private String trackGeojsonUrl;
+
+    /**
+     * Simplified remote route geometry for local map rendering.
+     */
+    @Column(name = "simplified_track", columnDefinition = "geometry(LineString, 4326)")
+    private LineString simplifiedTrack;
 
     /**
      * Visibility level of the activity.

@@ -10,13 +10,14 @@ import net.javahippie.fitpub.model.activitypub.OrderedCollection;
 import net.javahippie.fitpub.model.entity.Activity;
 import net.javahippie.fitpub.model.entity.RemoteActor;
 import net.javahippie.fitpub.model.entity.User;
-import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.ActivityRepository;
+import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
 import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.service.ActivityImageService;
 import net.javahippie.fitpub.service.FederationService;
 import net.javahippie.fitpub.service.InboxProcessor;
+import net.javahippie.fitpub.service.WorkoutDataPayloadBuilder;
 import net.javahippie.fitpub.util.ActivityFormatter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -29,6 +30,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -51,6 +53,7 @@ public class ActivityPubController {
     private final HttpSignatureValidator signatureValidator;
     private final FederationService federationService;
     private final ObjectMapper objectMapper;
+    private final WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
@@ -436,9 +439,10 @@ public class ActivityPubController {
         noteObject.put("id", activityUri);
         noteObject.put("type", "Note");
         noteObject.put("attributedTo", actorUri);
-        noteObject.put("published", activity.getCreatedAt().toString());
+        noteObject.put("published", activity.getCreatedAt().atOffset(ZoneOffset.UTC).toInstant().toString());
         noteObject.put("content", formatActivityContent(activity));
         noteObject.put("url", activityUri);
+        noteObject.put("workoutData", workoutDataPayloadBuilder.build(activity));
 
         // Audience — only PUBLIC activities reach this endpoint (the visibility
         // check above returned 403 for anything else), so audience is always

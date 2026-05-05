@@ -1,25 +1,42 @@
 package net.javahippie.fitpub.service;
 
+import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.ActivityMetrics;
+import net.javahippie.fitpub.model.entity.User;
+import net.javahippie.fitpub.repository.ActivityRepository;
+import net.javahippie.fitpub.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import net.javahippie.fitpub.model.entity.Activity;
-import net.javahippie.fitpub.model.entity.User;
-import net.javahippie.fitpub.repository.ActivityRepository;
-import net.javahippie.fitpub.repository.UserRepository;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.anyBoolean;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for ActivityPostProcessingService.
@@ -49,6 +66,9 @@ class ActivityPostProcessingServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private WorkoutDataPayloadBuilder workoutDataPayloadBuilder;
+
     @InjectMocks
     private ActivityPostProcessingService service;
 
@@ -56,11 +76,13 @@ class ActivityPostProcessingServiceTest {
     private UUID userId;
     private Activity testActivity;
     private User testUser;
+    private LocalDateTime createdAt;
 
     @BeforeEach
     void setUp() {
         activityId = UUID.randomUUID();
         userId = UUID.randomUUID();
+        createdAt = LocalDateTime.of(2026, 5, 2, 9, 24, 50, 921_241_000);
 
         // Set baseUrl via reflection (since it's @Value injected)
         ReflectionTestUtils.setField(service, "baseUrl", "https://test.example");
@@ -76,9 +98,39 @@ class ActivityPostProcessingServiceTest {
             .totalDistance(BigDecimal.valueOf(5000))
             .totalDurationSeconds(1800L)
             .elevationGain(BigDecimal.valueOf(100))
-            .startedAt(LocalDateTime.now())
-            .createdAt(LocalDateTime.now())
+            .startedAt(createdAt.minusMinutes(30))
+            .createdAt(createdAt)
+            .simplifiedTrack(new GeometryFactory().createLineString(new Coordinate[]{
+                new Coordinate(8.55, 47.37),
+                new Coordinate(8.56, 47.38)
+            }))
             .build();
+        testActivity.setMetrics(ActivityMetrics.builder()
+            .averagePaceSeconds(321L)
+            .build());
+        Map<String, Object> workoutData = new HashMap<>();
+        workoutData.put("activityType", "RUN");
+        workoutData.put("description", "Morning jog");
+        workoutData.put("distance", 5000L);
+        workoutData.put("duration", "PT30M");
+        workoutData.put("averagePace", "PT5M21S");
+        workoutData.put("elevationGain", 100);
+        workoutData.put("route", Map.of(
+            "type", "FeatureCollection",
+            "features", List.of(
+                Map.of(
+                    "type", "Feature",
+                    "geometry", Map.of(
+                        "type", "LineString",
+                        "coordinates", List.of(
+                            List.of(8.55, 47.37),
+                            List.of(8.56, 47.38)
+                        )
+                    )
+                )
+            )
+        ));
+        lenient().when(workoutDataPayloadBuilder.build(testActivity)).thenReturn(workoutData);
 
         // Create test user
         testUser = User.builder()
@@ -233,6 +285,24 @@ class ActivityPostProcessingServiceTest {
     }
 
     @Test
+    @DisplayName("Should serialize federation note published timestamp with timezone")
+    void testPublishToFederationAsync_PublishedTimestampIncludesTimezone() {
+        when(activityRepository.findById(activityId)).thenReturn(Optional.of(testActivity));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(activityImageService.generateActivityImage(testActivity)).thenReturn(null);
+        doNothing().when(federationService).sendCreateActivity(anyString(), any(), any(), anyBoolean());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Map<String, Object>> noteCaptor = ArgumentCaptor.forClass(java.util.Map.class);
+
+        service.publishToFederationAsync(activityId, userId);
+
+        verify(federationService).sendCreateActivity(anyString(), noteCaptor.capture(), eq(testUser), eq(true));
+        assertThat(noteCaptor.getValue().get("published"))
+            .isEqualTo(createdAt.atOffset(ZoneOffset.UTC).toInstant().toString());
+    }
+
+    @Test
     @DisplayName("Should skip federation for PRIVATE activity")
     void testPublishToFederationAsync_PrivateActivity() {
         // Given
@@ -316,5 +386,48 @@ class ActivityPostProcessingServiceTest {
 
         // Then: Verify federation was called (content formatting is tested indirectly)
         verify(federationService).sendCreateActivity(anyString(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("Should include workoutData payload in federation note")
+    void testPublishToFederationAsync_IncludesWorkoutDataPayload() {
+        when(activityRepository.findById(activityId)).thenReturn(Optional.of(testActivity));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(activityImageService.generateActivityImage(testActivity)).thenReturn(null);
+        doNothing().when(federationService).sendCreateActivity(anyString(), any(), any(), anyBoolean());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> noteCaptor = ArgumentCaptor.forClass(Map.class);
+
+        service.publishToFederationAsync(activityId, userId);
+
+        verify(federationService).sendCreateActivity(anyString(), noteCaptor.capture(), eq(testUser), eq(true));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> workoutData = (Map<String, Object>) noteCaptor.getValue().get("workoutData");
+        assertThat(workoutData)
+            .containsEntry("activityType", "RUN")
+            .containsEntry("description", "Morning jog")
+            .containsEntry("distance", 5000L)
+            .containsEntry("duration", "PT30M")
+            .containsEntry("averagePace", "PT5M21S")
+            .containsEntry("elevationGain", 100);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> route = (Map<String, Object>) workoutData.get("route");
+        assertThat(route).containsEntry("type", "FeatureCollection");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> features = (List<Map<String, Object>>) route.get("features");
+        assertThat(features).hasSize(1);
+        assertThat(features.get(0)).containsEntry("type", "Feature");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> geometry = (Map<String, Object>) features.get(0).get("geometry");
+        assertThat(geometry).containsEntry("type", "LineString");
+        assertThat(geometry.get("coordinates")).isEqualTo(List.of(
+            List.of(8.55, 47.37),
+            List.of(8.56, 47.38)
+        ));
     }
 }
