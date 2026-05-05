@@ -14,7 +14,7 @@ CREATE TABLE federation_inbox (
     payload_json JSONB NOT NULL,
 
     -- Processing lifecycle
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_error TEXT,
@@ -27,7 +27,7 @@ CREATE TABLE federation_inbox (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT chk_federation_inbox_status
-        CHECK (status IN ('pending', 'processing', 'done', 'error'))
+        CHECK (status IN ('PENDING', 'PROCESSING', 'DONE', 'ERROR'))
 );
 
 -- Indexes for claiming and operations
