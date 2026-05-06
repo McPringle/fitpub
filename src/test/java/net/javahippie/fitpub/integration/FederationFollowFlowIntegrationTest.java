@@ -393,7 +393,7 @@ class FederationFollowFlowIntegrationTest {
             "POST", inboxUrl, body, privateKeyPem, exportingActorUri + "#main-key"
         );
 
-        when(remoteActivityDetailsFetcher.fetch((String) exportedNote.get("fitpubDetailUri"))).thenReturn(java.util.Optional.of(
+        when(remoteActivityDetailsFetcher.fetch((String) exportedNote.get("fitpubDetailUri"), importingUser.getUsername())).thenReturn(java.util.Optional.of(
             RemoteActivityEnrichment.builder()
                 .activityType("RUN")
                 .title("Lunch Run")

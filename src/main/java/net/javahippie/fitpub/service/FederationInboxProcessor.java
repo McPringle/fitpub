@@ -69,7 +69,7 @@ public class FederationInboxProcessor {
                 entry.getPayloadJson(),
                 new TypeReference<Map<String, Object>>() {}
             );
-            RemoteActivityEnrichment enrichment = resolveEnrichment(activity).orElse(null);
+            RemoteActivityEnrichment enrichment = resolveEnrichment(activity, entry.getRecipientUsername()).orElse(null);
             federationActivityHandler.processActivity(entry.getRecipientUsername(), activity, enrichment);
             federationInboxService.markDone(entry.getId());
         } catch (Exception e) {
@@ -104,7 +104,7 @@ public class FederationInboxProcessor {
         }
     }
 
-    private Optional<RemoteActivityEnrichment> resolveEnrichment(Map<String, Object> activity) {
+    private Optional<RemoteActivityEnrichment> resolveEnrichment(Map<String, Object> activity, String recipientUsername) {
         if (!"Create".equals(activity.get("type"))) {
             return Optional.empty();
         }
@@ -128,7 +128,7 @@ public class FederationInboxProcessor {
                 activityUri, fitpubDetailUri);
             return Optional.empty();
         }
-        return remoteActivityDetailsFetcher.fetch(fitpubDetailUri);
+        return remoteActivityDetailsFetcher.fetch(fitpubDetailUri, recipientUsername);
     }
 
     private boolean isSameHost(String activityUri, String fitpubDetailUri) {

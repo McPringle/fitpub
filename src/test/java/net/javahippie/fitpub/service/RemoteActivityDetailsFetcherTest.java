@@ -1,6 +1,8 @@
 package net.javahippie.fitpub.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.javahippie.fitpub.repository.UserRepository;
+import net.javahippie.fitpub.security.HttpSignatureValidator;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,11 +28,18 @@ class RemoteActivityDetailsFetcherTest {
     @Mock
     private RestTemplate restTemplate;
 
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private HttpSignatureValidator signatureValidator;
+
     private RemoteActivityDetailsFetcher remoteActivityDetailsFetcher;
 
     @BeforeEach
     void setUp() {
-        remoteActivityDetailsFetcher = new RemoteActivityDetailsFetcher(restTemplate, new ObjectMapper());
+        remoteActivityDetailsFetcher = new RemoteActivityDetailsFetcher(
+            restTemplate, new ObjectMapper(), userRepository, signatureValidator);
     }
 
     @Test
@@ -63,7 +72,7 @@ class RemoteActivityDetailsFetcherTest {
         when(restTemplate.exchange(eq(endpoint), eq(HttpMethod.GET), any(), eq(String.class)))
             .thenReturn(new ResponseEntity<>(json, HttpStatus.OK));
 
-        Optional<RemoteActivityEnrichment> enrichment = remoteActivityDetailsFetcher.fetch(endpoint);
+        Optional<RemoteActivityEnrichment> enrichment = remoteActivityDetailsFetcher.fetch(endpoint, null);
 
         assertThat(enrichment).isPresent();
         assertThat(enrichment.get().activityType()).isEqualTo("RUN");
@@ -84,7 +93,7 @@ class RemoteActivityDetailsFetcherTest {
     @Test
     @DisplayName("Should skip enrichment when detail URI is missing")
     void fetch_ShouldSkipMissingDetailUri() {
-        assertThat(remoteActivityDetailsFetcher.fetch(null)).isEmpty();
-        assertThat(remoteActivityDetailsFetcher.fetch(" ")).isEmpty();
+        assertThat(remoteActivityDetailsFetcher.fetch(null, null)).isEmpty();
+        assertThat(remoteActivityDetailsFetcher.fetch(" ", null)).isEmpty();
     }
 }

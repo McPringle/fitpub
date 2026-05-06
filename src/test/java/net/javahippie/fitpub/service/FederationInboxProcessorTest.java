@@ -84,7 +84,7 @@ class FederationInboxProcessorTest {
         when(federationInboxService.claimById(entryId)).thenReturn(Optional.of(entry));
         when(objectMapper.readValue(eq(entry.getPayloadJson()), any(com.fasterxml.jackson.core.type.TypeReference.class)))
             .thenReturn(payload);
-        when(remoteActivityDetailsFetcher.fetch("https://remote.example/api/activities/123e4567-e89b-12d3-a456-426614174000"))
+        when(remoteActivityDetailsFetcher.fetch("https://remote.example/api/activities/123e4567-e89b-12d3-a456-426614174000", "janedoe"))
             .thenReturn(Optional.of(enrichment));
 
         federationInboxProcessor.trigger(entryId);

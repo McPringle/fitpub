@@ -6,9 +6,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import net.javahippie.fitpub.model.dto.ActivityDTO;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.Follow;
+import net.javahippie.fitpub.model.entity.RemoteActor;
 import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.ActivityRepository;
+import net.javahippie.fitpub.repository.FollowRepository;
+import net.javahippie.fitpub.repository.RemoteActorRepository;
 import net.javahippie.fitpub.repository.UserRepository;
+import net.javahippie.fitpub.security.HttpSignatureValidator;
 import net.javahippie.fitpub.security.JwtTokenProvider;
 import net.javahippie.fitpub.config.TestcontainersConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,13 +24,19 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.*;
@@ -55,7 +66,16 @@ class ActivityControllerIntegrationTest {
     private ActivityRepository activityRepository;
 
     @Autowired
+    private FollowRepository followRepository;
+
+    @Autowired
+    private RemoteActorRepository remoteActorRepository;
+
+    @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private HttpSignatureValidator signatureValidator;
 
     private User testUser;
     private String authToken;
@@ -75,6 +95,60 @@ class ActivityControllerIntegrationTest {
 
         // Generate JWT token
         authToken = jwtTokenProvider.createToken(testUser.getUsername());
+    }
+
+    private record SignedRemoteActor(RemoteActor actor, KeyPair keyPair) {
+        String keyId() {
+            return actor.getActorUri() + "#main-key";
+        }
+    }
+
+    private KeyPair generateRsaKeyPair() throws NoSuchAlgorithmException {
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+        keyGen.initialize(2048);
+        return keyGen.generateKeyPair();
+    }
+
+    private String encodePublicKey(byte[] keyBytes) {
+        String base64 = Base64.getEncoder().encodeToString(keyBytes);
+        return "-----BEGIN PUBLIC KEY-----\n" + base64 + "\n-----END PUBLIC KEY-----";
+    }
+
+    private String encodePrivateKey(byte[] keyBytes) {
+        String base64 = Base64.getEncoder().encodeToString(keyBytes);
+        return "-----BEGIN PRIVATE KEY-----\n" + base64 + "\n-----END PRIVATE KEY-----";
+    }
+
+    private SignedRemoteActor createSignedRemoteActor(String actorUri, String username, String domain, String displayName)
+        throws NoSuchAlgorithmException {
+        KeyPair keyPair = generateRsaKeyPair();
+        RemoteActor actor = RemoteActor.builder()
+            .actorUri(actorUri)
+            .username(username)
+            .domain(domain)
+            .displayName(displayName)
+            .inboxUrl(actorUri + "/inbox")
+            .outboxUrl(actorUri + "/outbox")
+            .publicKey(encodePublicKey(keyPair.getPublic().getEncoded()))
+            .publicKeyId(actorUri + "#main-key")
+            .lastFetchedAt(Instant.now())
+            .build();
+        return new SignedRemoteActor(remoteActorRepository.save(actor), keyPair);
+    }
+
+    private ResultActions performSignedActivityGet(UUID activityId, SignedRemoteActor remoteActor)
+        throws Exception {
+        String path = "/api/activities/" + activityId;
+        String url = "http://localhost" + path;
+        String privateKeyPem = encodePrivateKey(remoteActor.keyPair().getPrivate().getEncoded());
+        HttpSignatureValidator.SignatureHeaders sigHeaders = signatureValidator.signRequest(
+            "GET", url, "", privateKeyPem, remoteActor.keyId()
+        );
+        return mockMvc.perform(get(path)
+            .header("Host", sigHeaders.host)
+            .header("Date", sigHeaders.date)
+            .header("Digest", sigHeaders.digest)
+            .header("Signature", sigHeaders.signature));
     }
 
     @Test
@@ -136,6 +210,77 @@ class ActivityControllerIntegrationTest {
                 .andExpect(jsonPath("$.id").value(activity.getId().toString()))
                 .andExpect(jsonPath("$.title").value(activity.getTitle()))
                 .andExpect(jsonPath("$.activityType").value("Run")); // Enum is capitalized
+    }
+
+    @Test
+    @DisplayName("GET /api/activities/{id} - Should allow signed access to PUBLIC activity without follow")
+    void testGetActivity_Public_AllowsSignedRemoteAccess() throws Exception {
+        Activity activity = createTestActivity();
+        activity.setVisibility(Activity.Visibility.PUBLIC);
+        activity = activityRepository.save(activity);
+
+        SignedRemoteActor remoteActor = createSignedRemoteActor(
+            "https://remote.example/users/alice", "alice", "remote.example", "Alice");
+
+        performSignedActivityGet(activity.getId(), remoteActor)
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(activity.getId().toString()))
+            .andExpect(jsonPath("$.title").value(activity.getTitle()));
+    }
+
+    @Test
+    @DisplayName("GET /api/activities/{id} - Should allow signed access to FOLLOWERS activity for accepted remote follower")
+    void testGetActivity_Followers_AllowsAcceptedSignedRemoteFollower() throws Exception {
+        Activity activity = createTestActivity();
+        activity.setVisibility(Activity.Visibility.FOLLOWERS);
+        activity = activityRepository.save(activity);
+
+        SignedRemoteActor remoteActor = createSignedRemoteActor(
+            "https://remote.example/users/alice", "alice", "remote.example", "Alice");
+        followRepository.save(Follow.builder()
+            .remoteActorUri(remoteActor.actor().getActorUri())
+            .followingActorUri("http://localhost/users/" + testUser.getUsername())
+            .status(Follow.FollowStatus.ACCEPTED)
+            .activityId("https://remote.example/activities/follow/" + UUID.randomUUID())
+            .build());
+
+        performSignedActivityGet(activity.getId(), remoteActor)
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(activity.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("GET /api/activities/{id} - Should reject signed access to FOLLOWERS activity for non-follower")
+    void testGetActivity_Followers_RejectsSignedRemoteNonFollower() throws Exception {
+        Activity activity = createTestActivity();
+        activity.setVisibility(Activity.Visibility.FOLLOWERS);
+        activity = activityRepository.save(activity);
+
+        SignedRemoteActor remoteActor = createSignedRemoteActor(
+            "https://remote.example/users/alice", "alice", "remote.example", "Alice");
+
+        performSignedActivityGet(activity.getId(), remoteActor)
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("GET /api/activities/{id} - Should reject signed access to PRIVATE activity even for accepted remote follower")
+    void testGetActivity_Private_RejectsSignedRemoteFollower() throws Exception {
+        Activity activity = createTestActivity();
+        activity.setVisibility(Activity.Visibility.PRIVATE);
+        activity = activityRepository.save(activity);
+
+        SignedRemoteActor remoteActor = createSignedRemoteActor(
+            "https://remote.example/users/alice", "alice", "remote.example", "Alice");
+        followRepository.save(Follow.builder()
+            .remoteActorUri(remoteActor.actor().getActorUri())
+            .followingActorUri("http://localhost/users/" + testUser.getUsername())
+            .status(Follow.FollowStatus.ACCEPTED)
+            .activityId("https://remote.example/activities/follow/" + UUID.randomUUID())
+            .build());
+
+        performSignedActivityGet(activity.getId(), remoteActor)
+            .andExpect(status().isForbidden());
     }
 
     @Test
