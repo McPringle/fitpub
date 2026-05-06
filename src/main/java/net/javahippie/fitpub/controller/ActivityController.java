@@ -1,5 +1,6 @@
 package net.javahippie.fitpub.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -9,7 +10,9 @@ import net.javahippie.fitpub.model.dto.ActivityDTO;
 import net.javahippie.fitpub.model.dto.ActivityUpdateRequest;
 import net.javahippie.fitpub.model.dto.ActivityUploadRequest;
 import net.javahippie.fitpub.model.entity.Activity;
+import net.javahippie.fitpub.model.entity.Follow;
 import net.javahippie.fitpub.model.entity.PrivacyZone;
+import net.javahippie.fitpub.model.entity.RemoteActor;
 import net.javahippie.fitpub.model.entity.User;
 import net.javahippie.fitpub.repository.FollowRepository;
 import net.javahippie.fitpub.repository.UserRepository;
@@ -23,6 +26,7 @@ import net.javahippie.fitpub.service.PrivacyZoneService;
 import net.javahippie.fitpub.service.ReactionEnricher;
 import net.javahippie.fitpub.service.TextValidationService;
 import net.javahippie.fitpub.service.TrackPrivacyFilter;
+import net.javahippie.fitpub.security.HttpSignatureValidator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +42,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * REST controller for activity management.
@@ -62,9 +68,12 @@ public class ActivityController {
     private final TrackPrivacyFilter trackPrivacyFilter;
     private final net.javahippie.fitpub.repository.ActivityPeakRepository activityPeakRepository;
     private final ReactionEnricher reactionEnricher;
+    private final HttpSignatureValidator signatureValidator;
 
     @Value("${fitpub.base-url}")
     private String baseUrl;
+
+    private static final Pattern SIGNATURE_KEY_ID_PATTERN = Pattern.compile("keyId=\"([^\"]+)\"");
 
     /**
      * Checks whether a viewer is allowed to see a non-public activity. Caller
@@ -208,7 +217,8 @@ public class ActivityController {
     @GetMapping("/{id}")
     public ResponseEntity<ActivityDTO> getActivity(
         @PathVariable UUID id,
-        @AuthenticationPrincipal UserDetails userDetails
+        @AuthenticationPrincipal UserDetails userDetails,
+        HttpServletRequest request
     ) {
         // First try to get the activity directly
         Activity activity = fitFileService.getActivityById(id);
@@ -237,14 +247,14 @@ public class ActivityController {
         }
 
         // For non-public activities, require authentication
-        if (userDetails == null) {
+        if (userDetails == null && !canViewNonPublicActivityViaFederation(activity, request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        UUID userId = getUserId(userDetails);
+        UUID userId = userDetails != null ? getUserId(userDetails) : null;
 
         // Check if user has access (owner, or follower for FOLLOWERS visibility)
-        if (!canViewNonPublicActivity(activity, userId)) {
+        if (userDetails != null && !canViewNonPublicActivity(activity, userId)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
@@ -253,6 +263,70 @@ public class ActivityController {
         populatePeaks(dto, id);
         reactionEnricher.enrichSingle(dto, requestingUserId);
         return ResponseEntity.ok(dto);
+    }
+
+    private boolean canViewNonPublicActivityViaFederation(Activity activity, HttpServletRequest request) {
+        if (activity.getVisibility() != Activity.Visibility.FOLLOWERS) {
+            return false;
+        }
+
+        String signatureHeader = request.getHeader("Signature");
+        if (signatureHeader == null || signatureHeader.isBlank()) {
+            return false;
+        }
+
+        String keyId = extractKeyId(signatureHeader);
+        if (keyId == null) {
+            return false;
+        }
+
+        String actorUri = keyId.contains("#") ? keyId.substring(0, keyId.indexOf('#')) : keyId;
+        String publicKeyPem;
+        try {
+            RemoteActor remoteActor = federationService.fetchRemoteActor(actorUri);
+            publicKeyPem = remoteActor.getPublicKey();
+        } catch (Exception e) {
+            log.warn("Failed to fetch remote actor {} for signed activity detail request", actorUri, e);
+            return false;
+        }
+
+        if (publicKeyPem == null || publicKeyPem.isBlank()) {
+            return false;
+        }
+
+        if (!signatureValidator.validate(signatureHeader, collectHeaders(request), publicKeyPem)) {
+            return false;
+        }
+
+        User owner = userRepository.findById(activity.getUserId()).orElse(null);
+        if (owner == null) {
+            return false;
+        }
+
+        String ownerActorUri = baseUrl + "/users/" + owner.getUsername();
+        return followRepository.findByRemoteActorUriAndFollowingActorUri(actorUri, ownerActorUri)
+            .filter(f -> f.getStatus() == Follow.FollowStatus.ACCEPTED)
+            .isPresent();
+    }
+
+    private Map<String, String> collectHeaders(HttpServletRequest request) {
+        Map<String, String> headers = new HashMap<>();
+        java.util.Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames.hasMoreElements()) {
+            String name = headerNames.nextElement();
+            headers.put(name.toLowerCase(), request.getHeader(name));
+        }
+        String uri = request.getRequestURI();
+        if (request.getQueryString() != null) {
+            uri += "?" + request.getQueryString();
+        }
+        headers.put("(request-target)", request.getMethod().toLowerCase() + " " + uri);
+        return headers;
+    }
+
+    private String extractKeyId(String signatureHeader) {
+        Matcher matcher = SIGNATURE_KEY_ID_PATTERN.matcher(signatureHeader);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     /**

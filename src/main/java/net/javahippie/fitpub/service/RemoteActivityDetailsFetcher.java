@@ -4,10 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javahippie.fitpub.model.dto.ActivityDTO;
+import net.javahippie.fitpub.model.entity.User;
+import net.javahippie.fitpub.repository.UserRepository;
+import net.javahippie.fitpub.security.HttpSignatureValidator;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.PrecisionModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -37,8 +41,13 @@ public class RemoteActivityDetailsFetcher {
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final UserRepository userRepository;
+    private final HttpSignatureValidator signatureValidator;
 
-    public Optional<RemoteActivityEnrichment> fetch(String fitpubDetailUri) {
+    @Value("${fitpub.base-url}")
+    private String baseUrl;
+
+    public Optional<RemoteActivityEnrichment> fetch(String fitpubDetailUri, String requestingUsername) {
         if (fitpubDetailUri == null || fitpubDetailUri.isBlank()) {
             return Optional.empty();
         }
@@ -47,6 +56,7 @@ public class RemoteActivityDetailsFetcher {
             String endpoint = normalizeEndpoint(fitpubDetailUri);
             HttpHeaders headers = new HttpHeaders();
             headers.set("Accept", "application/json");
+            addFederationSignatureHeaders(headers, endpoint, requestingUsername);
 
             ResponseEntity<String> response = restTemplate.exchange(
                 endpoint,
@@ -80,6 +90,32 @@ public class RemoteActivityDetailsFetcher {
             throw new IllegalArgumentException("fitpubDetailUri must be an absolute URI");
         }
         return fitpubDetailUri;
+    }
+
+    private void addFederationSignatureHeaders(HttpHeaders headers, String endpoint, String requestingUsername) {
+        if (requestingUsername == null || requestingUsername.isBlank()) {
+            return;
+        }
+
+        User requestingUser = userRepository.findByUsername(requestingUsername).orElse(null);
+        if (requestingUser == null || requestingUser.getPrivateKey() == null || requestingUser.getPrivateKey().isBlank()) {
+            log.warn("Skipping signed federation detail fetch for unknown or unsigned user {}", requestingUsername);
+            return;
+        }
+
+        String actorUri = requestingUser.getActorUri(baseUrl);
+        HttpSignatureValidator.SignatureHeaders signatureHeaders = signatureValidator.signRequest(
+            HttpMethod.GET.name(),
+            endpoint,
+            "",
+            requestingUser.getPrivateKey(),
+            actorUri + "#main-key"
+        );
+
+        headers.set("Host", signatureHeaders.host);
+        headers.set("Date", signatureHeaders.date);
+        headers.set("Digest", signatureHeaders.digest);
+        headers.set("Signature", signatureHeaders.signature);
     }
 
     private RemoteActivityEnrichment map(ActivityDTO dto) {
